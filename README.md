@@ -8,11 +8,15 @@ This project processes End-of-Day (EOD) position CSV files, merges them with ind
 
 ## Features
 
-- **Data Combination**: Combines multiple daily position files into a single dataset
-- **Industry Mapping**: Maps stock symbols to sectors using industry codes
-- **P&L Analysis**: Calculates daily and cumulative P&L by sector
-- **Visualizations**: Generates heatmaps, line charts, and bar charts
-- **Report Generation**: Creates detailed markdown and HTML reports
+- **Multi-Simulation Support**: Process one or more simulation datasets (e.g., TWOFISH, BLOWFISH, bye, byd)
+- **Data Combination**: Combines daily position files into simulation-specific datasets
+- **Industry Mapping**: Maps stock symbols to sectors using industry codes (corrected: 55=Financials, 56=Health Care)
+- **P&L Analysis**: Calculates daily and cumulative P&L by sector for each simulation
+- **Visualizations**: Generates heatmaps, line charts, and bar charts for individual simulations
+- **Report Generation**: Creates detailed markdown and HTML reports for each simulation
+- **Comparative Analysis**: Compares performance across multiple simulations with side-by-side metrics
+- **Comparative Visualizations**: Generates comparison charts, heatmaps, and correlation plots
+- **Comprehensive Reporting**: Produces comparative analysis reports with insights and recommendations
 
 ## Quick Start
 
@@ -23,75 +27,135 @@ This project processes End-of-Day (EOD) position CSV files, merges them with ind
    pip install -r requirements.txt
    ```
 
-2. **Run the analysis pipeline**:
+2. **Run single simulation analysis**:
    ```bash
-   # Option 1: Run each script individually
-   python combine_data.py        # Step 1: Combine data
-   python pnl_analysis.py        # Step 2: Analyze P&L
-   python generate_report.py     # Step 3: Generate reports
+   # Option 1: Run each script individually (with simulation parameter)
+   python combine_data.py --simulation TWOFISH --pos-dir pos
+   python pnl_analysis.py --simulation TWOFISH --output-dir outputs
+   python generate_report.py --simulation TWOFISH --output-dir outputs
 
-   # Option 2: Use the runner script (interactive)
-   ./run_analysis.sh             # Linux/macOS/Git Bash
+   # Option 2: Use runner script (interactive)
+   ./run_analysis.sh TWOFISH                    # Linux/macOS/Git Bash
    # or
-   run_analysis.bat              # Windows CMD
+   run_analysis.bat TWOFISH                     # Windows CMD
 
-   # Option 3: Use the auto runner (no prompts, overwrites files)
-   ./run_analysis_auto.sh        # Linux/macOS/Git Bash
+   # Option 3: Use auto runner (no prompts, overwrites files)
+   ./run_analysis_auto.sh TWOFISH               # Linux/macOS/Git Bash
 
    # Note: On first use, you may need to make bash scripts executable:
    # chmod +x run_analysis.sh run_analysis_auto.sh
    ```
 
+3. **Run multiple simulations with comparison**:
+   ```bash
+   # Analyze two simulations and compare results
+   ./run_analysis_auto.sh bye byd --compare
+
+   # With simulation subdirectories (e.g., bye/pos/, byd/pos/)
+   ./run_analysis_auto.sh bye byd --pos-dir-base . --compare
+
+   # Or run comparison on existing results
+   python compare_simulations.py bye byd --output-base-dir outputs
+   python generate_comparison_report.py --comparison-dir outputs/comparison
+   ```
+
 ## Project Structure
 
 ```
-├── combine_data.py              # Data combination script
-├── pnl_analysis.py              # P&L analysis script
-├── generate_report.py           # Report generation script
+├── combine_data.py              # Data combination script (multi-simulation)
+├── pnl_analysis.py              # P&L analysis script (per simulation)
+├── generate_report.py           # Report generation script (per simulation)
+├── compare_simulations.py       # Comparative analysis script (multi-simulation)
+├── generate_comparison_report.py # Comparison report generation
 ├── run_analysis.sh              # Pipeline runner (Bash, interactive)
 ├── run_analysis.bat             # Pipeline runner (Windows CMD)
-├── run_analysis_auto.sh         # Pipeline runner (Bash, auto mode)
+├── run_analysis_auto.sh         # Pipeline runner (Bash, auto mode with comparison)
 ├── requirements.txt             # Python dependencies
 ├── CLAUDE.md                    # Development guide
 ├── README.md                    # This file
 ├── .gitignore                   # Git exclusions
-└── position_analysis_report.md  # Sample output report
+└── Industry.csv                 # Industry mapping file
 ```
 
 ## Runner Scripts
 
-Three runner scripts are provided for convenience:
+Three runner scripts are provided for convenience, all supporting multi-simulation analysis and comparison:
 
 1. **`run_analysis.sh`** (Bash, interactive):
-   - Runs all three Python scripts in sequence
+   - Runs the complete pipeline for one or more simulations
    - Checks for dependencies and Python version
    - Prompts before overwriting existing files
    - Works on Linux, macOS, and Git Bash (Windows)
+   - **Usage**: `./run_analysis.sh [SIMULATION...] [--compare] [--pos-dir-base DIR]`
 
 2. **`run_analysis.bat`** (Windows CMD):
    - Windows batch file with same functionality
    - Includes pause on error and completion
+   - **Usage**: `run_analysis.bat [SIMULATION...] [--compare] [--pos-dir-base DIR]`
 
 3. **`run_analysis_auto.sh`** (Bash, auto mode):
    - Automatically overwrites existing files without prompts
+   - Supports multi-simulation analysis with `--compare` option
+   - Runs comparative analysis after processing all simulations
    - Useful for automated runs and CI/CD pipelines
+   - **Usage**: `./run_analysis_auto.sh [SIMULATION...] [--compare] [--pos-dir-base DIR]`
 
-All runners validate Python and package dependencies before starting.
+All runners validate Python and package dependencies before starting and support:
+- **Multiple simulations**: Analyze several datasets in sequence
+- **Comparison mode**: Generate comparative analysis with `--compare` flag
+- **Flexible data organization**: Use `--pos-dir-base` for simulation subdirectories
 
 ## Data Requirements
 
-Place the following in a `pos/` directory:
-- Daily position files: `ePos_TWOFISH_YYYYMMDD_EOD.csv`
-- Industry mapping: `Industry.csv`
+### Data Organization Options
 
-**Note**: The `pos/` directory and generated data files are excluded from git via `.gitignore`.
+**Option 1: Single simulation in `pos/` directory:**
+- Daily position files: `ePos_TWOFISH_YYYYMMDD_EOD.csv`
+- Industry mapping: `Industry.csv` (in `pos/`, current directory, or parent directory)
+
+**Option 2: Multiple simulations in separate directories:**
+- Base directory with simulation subdirectories (e.g., `bye/pos/`, `byd/pos/`)
+- Each subdirectory contains: `ePos_TWOFISH_YYYYMMDD_EOD.csv` files
+- Industry mapping: `Industry.csv` (searched in multiple locations)
+
+**Option 3: Multiple simulations with different prefixes:**
+- All files in `pos/` directory with different prefixes: `ePos_{SIMULATION}_YYYYMMDD_EOD.csv`
+- Industry mapping: `Industry.csv` in `pos/` directory
+
+**Note**: The `pos/` directory, simulation subdirectories, and generated data files are excluded from git via `.gitignore`.
 
 ## Outputs
 
-- `combined_positions_with_industry.csv`: Combined dataset
-- `pnl_plots/`: Visualization images (PNG)
-- `pnl_results/`: Intermediate analysis results (CSV)
-- `position_analysis_report.{md,html}`: Comprehensive reports
+### Per Simulation Outputs
+- `outputs/{SIMULATION}/combined_positions_with_industry.csv`: Combined dataset
+- `outputs/{SIMULATION}/pnl_plots/`: Visualization images (PNG)
+- `outputs/{SIMULATION}/pnl_results/`: Intermediate analysis results (CSV)
+- `outputs/{SIMULATION}/{SIMULATION}_analysis_report.{md,html}`: Comprehensive reports
+
+### Comparison Outputs (when using `--compare`)
+- `outputs/comparison/`: Comparative analysis directory
+- `outputs/comparison/comparison_plots/`: Comparative visualizations
+- `outputs/comparison/comparison_data/`: Comparison metrics and data
+- `outputs/comparison/comparison_report.{md,html}`: Comprehensive comparison report
+
+### Example Output Structure
+```
+outputs/
+├── TWOFISH/
+│   ├── combined_positions_with_industry.csv
+│   ├── pnl_results/
+│   ├── pnl_plots/
+│   └── TWOFISH_analysis_report.{md,html}
+├── BLOWFISH/
+│   ├── combined_positions_with_industry.csv
+│   ├── pnl_results/
+│   ├── pnl_plots/
+│   └── BLOWFISH_analysis_report.{md,html}
+└── comparison/
+    ├── comparison_plots/
+    ├── comparison_data/
+    └── comparison_report.{md,html}
+```
 
 ## License
 
