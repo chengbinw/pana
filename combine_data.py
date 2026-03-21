@@ -2,32 +2,54 @@ import pandas as pd
 import numpy as np
 import os
 import re
+import argparse
 from pathlib import Path
 
-def extract_date_from_filename(filename):
-    """Extract date from filename pattern: ePos_TWOFISH_YYYYMMDD_EOD.csv"""
-    match = re.search(r'ePos_TWOFISH_(\d{8})_EOD\.csv$', filename)
+def extract_date_from_filename(filename, simulation='TWOFISH'):
+    """Extract date from filename pattern: ePos_{simulation}_YYYYMMDD_EOD.csv"""
+    # Escape simulation name for regex (in case it contains special characters)
+    sim_escaped = re.escape(simulation)
+    pattern = fr'ePos_{sim_escaped}_(\d{{8}})_EOD\.csv$'
+    match = re.search(pattern, filename)
     if match:
         date_str = match.group(1)
         # Convert to datetime
         return pd.to_datetime(date_str, format='%Y%m%d')
     return None
 
-def combine_position_files(pos_dir='pos'):
-    """Combine all position CSV files in directory"""
+def combine_position_files(pos_dir='pos', simulation='TWOFISH'):
+    """Combine all position CSV files in directory for given simulation"""
     pos_path = Path(pos_dir)
     all_data = []
 
-    # Get all position files
-    pos_files = list(pos_path.glob('ePos_TWOFISH_*.csv'))
-    print(f"Found {len(pos_files)} position files")
+    # Try different filename prefixes to find position files
+    prefixes_to_try = [simulation]
+    if simulation != 'TWOFISH':
+        prefixes_to_try.append('TWOFISH')
+
+    pos_files = []
+    prefix_used = None
+
+    for prefix in prefixes_to_try:
+        pos_files = list(pos_path.glob(f'ePos_{prefix}_*.csv'))
+        if pos_files:
+            prefix_used = prefix
+            print(f"Found {len(pos_files)} position files using prefix '{prefix}'")
+            break
+
+    if not pos_files:
+        print(f"Found 0 position files for simulation '{simulation}' (tried prefixes: {', '.join(prefixes_to_try)})")
+        print("No data loaded")
+        return None
+
+    print(f"Using filename prefix: {prefix_used}")
 
     for i, file_path in enumerate(pos_files):
         if i % 50 == 0:
             print(f"Processing file {i+1}/{len(pos_files)}: {file_path.name}")
 
-        # Extract date from filename
-        date = extract_date_from_filename(file_path.name)
+        # Extract date from filename using the actual prefix found
+        date = extract_date_from_filename(file_path.name, prefix_used)
         if date is None:
             print(f"Warning: Could not extract date from {file_path.name}")
             continue
@@ -56,12 +78,35 @@ def combine_position_files(pos_dir='pos'):
 
     return combined_df
 
-def load_industry_data(pos_dir='pos'):
-    """Load industry mapping data"""
-    industry_path = Path(pos_dir) / 'Industry.csv'
+def load_industry_data(industry_path='pos'):
+    """Load industry mapping data
+
+    Args:
+        industry_path: Path to industry CSV file, or directory containing Industry.csv
+    """
+    industry_path = Path(industry_path)
+    if industry_path.is_dir():
+        industry_path = industry_path / 'Industry.csv'
+
     if not industry_path.exists():
         print(f"Industry file not found at {industry_path}")
-        return None
+        # Try alternative locations
+        alternative_paths = [
+            Path('Industry.csv'),           # Current directory
+            Path('pos/Industry.csv'),       # pos subdirectory
+            Path('../Industry.csv'),        # Parent directory
+        ]
+
+        for alt_path in alternative_paths:
+            if alt_path.exists():
+                industry_path = alt_path
+                print(f"  Found industry file at alternative location: {industry_path}")
+                break
+        else:
+            print(f"Industry file not found. Also tried:")
+            for alt_path in alternative_paths:
+                print(f"  - {alt_path}")
+            return None
 
     industry_df = pd.read_csv(industry_path)
     print(f"Industry data shape: {industry_df.shape}")
@@ -76,8 +121,8 @@ def load_industry_data(pos_dir='pos'):
         '52': 'Industrials',
         '53': 'Consumer Discretionary',
         '54': 'Consumer Staples',
-        '55': 'Health Care',
-        '56': 'Financials',
+        '55': 'Financials',
+        '56': 'Health Care',
         '57': 'Information Technology',
         '58': 'Communication Services',
         '59': 'Utilities',
@@ -115,20 +160,48 @@ def merge_with_industry(position_df, industry_df):
     return merged_df
 
 def main():
-    print("Step 1: Combining position files...")
-    position_df = combine_position_files('pos')
+    parser = argparse.ArgumentParser(description='Combine position files with industry data')
+    parser.add_argument('--simulation', '-s', default='TWOFISH',
+                        help='Simulation name (default: TWOFISH)')
+    parser.add_argument('--pos-dir', '-p', default='pos',
+                        help='Directory containing position files (default: pos)')
+    parser.add_argument('--output-dir', '-o', default='outputs',
+                        help='Base output directory (default: outputs)')
+    parser.add_argument('--industry-file',
+                        help='Path to industry mapping CSV (default: pos_dir/Industry.csv)')
 
-    print("\nStep 2: Loading industry data...")
-    industry_df = load_industry_data('pos')
+    args = parser.parse_args()
 
-    print("\nStep 3: Merging data...")
+    # Create simulation-specific output directory
+    sim_output_dir = Path(args.output_dir) / args.simulation
+    sim_output_dir.mkdir(parents=True, exist_ok=True)
+
+    print("=" * 60)
+    print(f"COMBINING POSITION DATA FOR SIMULATION: {args.simulation}")
+    print("=" * 60)
+
+    print(f"\nStep 1: Combining position files...")
+    position_df = combine_position_files(args.pos_dir, args.simulation)
+
+    print(f"\nStep 2: Loading industry data...")
+    industry_path = args.industry_file if args.industry_file else Path(args.pos_dir) / 'Industry.csv'
+    industry_df = load_industry_data(industry_path)
+
+    print(f"\nStep 3: Merging data...")
     merged_df = merge_with_industry(position_df, industry_df)
 
     if merged_df is not None:
-        # Save to CSV
-        output_path = 'combined_positions_with_industry.csv'
+        # Save to CSV in simulation output directory
+        output_path = sim_output_dir / 'combined_positions_with_industry.csv'
         merged_df.to_csv(output_path, index=False)
         print(f"\nSaved combined data to: {output_path}")
+
+        # Also save a copy in the root directory for backward compatibility
+        # (only if simulation is TWOFISH and output-dir is 'outputs')
+        if args.simulation == 'TWOFISH' and args.output_dir == 'outputs':
+            legacy_path = Path('combined_positions_with_industry.csv')
+            merged_df.to_csv(legacy_path, index=False)
+            print(f"Also saved to legacy location: {legacy_path} (for backward compatibility)")
 
         # Basic statistics
         print("\n=== Basic Statistics ===")

@@ -1,24 +1,44 @@
 import pandas as pd
 import numpy as np
+import argparse
 from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore')
 
-def load_data():
+def load_data(simulation='TWOFISH', output_dir='outputs'):
     """Load all necessary data"""
-    # Load combined data
-    combined_path = Path('combined_positions_with_industry.csv')
+    # Try simulation-specific location first
+    combined_path = Path(output_dir) / simulation / 'combined_positions_with_industry.csv'
+    results_dir = Path(output_dir) / simulation / 'pnl_results'
+
+    # Fallback to legacy locations for backward compatibility
+    if not combined_path.exists():
+        if simulation == 'TWOFISH' and output_dir == 'outputs':
+            combined_path = Path('combined_positions_with_industry.csv')
+            results_dir = Path('pnl_results')
+        else:
+            print(f"Combined data not found at {combined_path}")
+            return None, None, None, None
+
     if not combined_path.exists():
         print("Combined data not found")
-        return None, None, None
+        return None, None, None, None
 
+    print(f"Loading combined data from {combined_path}")
     df = pd.read_csv(combined_path, parse_dates=['date'])
 
     # Load analysis results
-    results_dir = Path('pnl_results')
-    sector_daily = pd.read_csv(results_dir / 'sector_daily_pnl.csv', parse_dates=['date'])
-    sector_summary = pd.read_csv(results_dir / 'sector_summary.csv')
-    daily_total = pd.read_csv(results_dir / 'daily_total_pnl.csv', parse_dates=['date'])
+    sector_daily_path = results_dir / 'sector_daily_pnl.csv'
+    sector_summary_path = results_dir / 'sector_summary.csv'
+    daily_total_path = results_dir / 'daily_total_pnl.csv'
+
+    if not sector_daily_path.exists():
+        print(f"Analysis results not found at {results_dir}")
+        return None, None, None, None
+
+    sector_daily = pd.read_csv(sector_daily_path, parse_dates=['date'])
+    sector_summary = pd.read_csv(sector_summary_path)
+    daily_total = pd.read_csv(daily_total_path, parse_dates=['date'])
 
     return df, sector_daily, sector_summary, daily_total
 
@@ -98,10 +118,10 @@ def calculate_additional_metrics(df, sector_daily):
 
     return insights
 
-def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insights):
+def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insights, simulation='TWOFISH', output_dir='outputs'):
     """Generate a comprehensive markdown report"""
     report = []
-    report.append("# Position Analysis Report")
+    report.append(f"# Position Analysis Report - {simulation}")
     report.append(f"*Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}*")
     report.append("")
 
@@ -201,21 +221,21 @@ def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insi
 
     report.append("The following visualizations have been generated:")
     report.append("")
-    report.append("1. **Weekly P&L Heatmap by Sector** - `pnl_plots/weekly_pnl_heatmap.png`")
-    report.append("2. **Cumulative P&L by Sector** - `pnl_plots/cumulative_pnl_by_sector.png`")
-    report.append("3. **Total P&L by Sector** - `pnl_plots/total_pnl_by_sector.png`")
-    report.append("4. **Daily Total P&L** - `pnl_plots/daily_total_pnl.png`")
-    report.append("5. **Sector Exposure Over Time** - `pnl_plots/sector_exposure_over_time.png`")
+    report.append(f"1. **Weekly P&L Heatmap by Sector** - `{output_dir}/{simulation}/pnl_plots/weekly_pnl_heatmap.png`")
+    report.append(f"2. **Cumulative P&L by Sector** - `{output_dir}/{simulation}/pnl_plots/cumulative_pnl_by_sector.png`")
+    report.append(f"3. **Total P&L by Sector** - `{output_dir}/{simulation}/pnl_plots/total_pnl_by_sector.png`")
+    report.append(f"4. **Daily Total P&L** - `{output_dir}/{simulation}/pnl_plots/daily_total_pnl.png`")
+    report.append(f"5. **Sector Exposure Over Time** - `{output_dir}/{simulation}/pnl_plots/sector_exposure_over_time.png`")
     report.append("")
 
     # 10. Data Files
     report.append("## Data Files")
     report.append("")
 
-    report.append("- **Combined Positions**: `combined_positions_with_industry.csv`")
-    report.append("- **Sector Daily P&L**: `pnl_results/sector_daily_pnl.csv`")
-    report.append("- **Sector Summary**: `pnl_results/sector_summary.csv`")
-    report.append("- **Daily Total P&L**: `pnl_results/daily_total_pnl.csv`")
+    report.append(f"- **Combined Positions**: `{output_dir}/{simulation}/combined_positions_with_industry.csv`")
+    report.append(f"- **Sector Daily P&L**: `{output_dir}/{simulation}/pnl_results/sector_daily_pnl.csv`")
+    report.append(f"- **Sector Summary**: `{output_dir}/{simulation}/pnl_results/sector_summary.csv`")
+    report.append(f"- **Daily Total P&L**: `{output_dir}/{simulation}/pnl_results/daily_total_pnl.csv`")
     report.append("")
 
     # 11. Key Insights
@@ -235,7 +255,7 @@ def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insi
     report.append("")
 
     # Write to file
-    report_path = Path('position_analysis_report.md')
+    report_path = Path(f'{simulation}_analysis_report.md')
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(report))
 
@@ -248,7 +268,7 @@ def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insi
     html_report.append("<head>")
     html_report.append("<meta charset='UTF-8'>")
     html_report.append("<meta name='viewport' content='width=device-width, initial-scale=1.0'>")
-    html_report.append("<title>Position Analysis Report</title>")
+    html_report.append(f"<title>Position Analysis Report - {simulation}</title>")
     html_report.append("<style>")
     html_report.append("body { font-family: Arial, sans-serif; line-height: 1.6; margin: 20px; }")
     html_report.append("h1, h2 { color: #333; }")
@@ -289,17 +309,29 @@ def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insi
     html_report.append("</body>")
     html_report.append("</html>")
 
-    html_path = Path('position_analysis_report.html')
+    html_path = Path(f'{simulation}_analysis_report.html')
     with open(html_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(html_report))
 
     print(f"HTML report saved to: {html_path}")
 
 def main():
+    parser = argparse.ArgumentParser(description='Generate comprehensive position analysis report')
+    parser.add_argument('--simulation', '-s', default='TWOFISH',
+                        help='Simulation name (default: TWOFISH)')
+    parser.add_argument('--output-dir', '-o', default='outputs',
+                        help='Base output directory (default: outputs)')
+
+    args = parser.parse_args()
+
+    print("="*60)
+    print(f"GENERATING REPORT FOR SIMULATION: {args.simulation}")
+    print("="*60)
+
     print("Generating comprehensive report...")
 
     # Load data
-    df, sector_daily, sector_summary, daily_total = load_data()
+    df, sector_daily, sector_summary, daily_total = load_data(args.simulation, args.output_dir)
     if df is None:
         return
 
@@ -309,7 +341,8 @@ def main():
 
     # Generate reports
     print("Generating markdown and HTML reports...")
-    generate_markdown_report(df, sector_daily, sector_summary, daily_total, insights)
+    generate_markdown_report(df, sector_daily, sector_summary, daily_total, insights,
+                             simulation=args.simulation, output_dir=args.output_dir)
 
     print("\nReport generation complete!")
 

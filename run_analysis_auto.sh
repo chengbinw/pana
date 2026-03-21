@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# Financial Position Analysis Pipeline Runner
-# This script runs the complete analysis pipeline for one or more simulations
+# Financial Position Analysis Pipeline Runner (Auto mode)
+# This script runs the complete analysis pipeline for one or more simulations without prompts
 # Usage:
-#   ./run_analysis.sh                         # Run default simulation (TWOFISH)
-#   ./run_analysis.sh TWOFISH                 # Run specific simulation
-#   ./run_analysis.sh TWOFISH BLOWFISH        # Run multiple simulations
-#   ./run_analysis.sh TWOFISH BLOWFISH --compare  # Run multiple and compare
-#   ./run_analysis.sh --help                  # Show help
+#   ./run_analysis_auto.sh                         Run default simulation (TWOFISH)
+#   ./run_analysis_auto.sh TWOFISH                 Run specific simulation
+#   ./run_analysis_auto.sh TWOFISH BLOWFISH        Run multiple simulations
+#   ./run_analysis_auto.sh TWOFISH BLOWFISH --compare  Run multiple and compare
+#   ./run_analysis_auto.sh --help                  Show help
 
 set -e  # Exit on any error
 
@@ -22,7 +22,7 @@ OUTPUT_BASE_DIR="outputs"
 while [[ $# -gt 0 ]]; do
     case $1 in
         --help|-h)
-            echo "Financial Position Analysis Pipeline"
+            echo "Financial Position Analysis Pipeline (Auto Mode)"
             echo "Usage: $0 [SIMULATION...] [--compare] [--pos-dir DIR] [--pos-dir-base DIR] [--output-dir DIR]"
             echo ""
             echo "Arguments:"
@@ -30,7 +30,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --compare        Run comparison after analyzing all simulations"
             echo "  --pos-dir DIR    Directory containing position files (default: pos)"
             echo "  --pos-dir-base DIR Base directory with simulation subdirectories"
-            echo "                   (if set, uses DIR/SIMULATION for each simulation)"
+            echo "                   (if set, uses DIR/SIMULATION/pos for each simulation)"
             echo "  --output-dir DIR Base output directory (default: outputs)"
             echo "  --help, -h       Show this help message"
             exit 0
@@ -70,7 +70,7 @@ if [ ${#SIMULATIONS[@]} -gt 1 ]; then
 fi
 
 echo "========================================"
-echo "Financial Position Analysis Pipeline"
+echo "Financial Position Analysis Pipeline (Auto Mode)"
 echo "========================================"
 echo "Starting at: $(date)"
 echo ""
@@ -108,7 +108,7 @@ python -c "import pandas, numpy, matplotlib, seaborn, pathlib" && \
 # Create output base directory
 mkdir -p "$OUTPUT_BASE_DIR"
 
-# Function to run pipeline for a single simulation
+# Function to run pipeline for a single simulation (auto mode - no prompts)
 run_simulation_pipeline() {
     local sim="$1"
     local pos_dir="$2"
@@ -124,19 +124,12 @@ run_simulation_pipeline() {
     echo "Step 1: Combining position files with industry data"
     echo "----------------------------------------"
 
-    # Check if output already exists
     local sim_output_dir="$output_base_dir/$sim"
     local combined_file="$sim_output_dir/combined_positions_with_industry.csv"
 
     if [ -f "$combined_file" ]; then
-        echo "Note: Combined data already exists for $sim"
-        echo "It will be overwritten with new data"
-        read -p "Continue? (y/n): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            echo "Skipping $sim"
-            return 1
-        fi
+        echo "Note: Overwriting existing combined data for $sim"
+        rm -f "$combined_file"
     fi
 
     echo "Running combine_data.py for $sim..."
@@ -155,14 +148,8 @@ run_simulation_pipeline() {
     local results_dir="$sim_output_dir/pnl_results"
 
     if [ -d "$plots_dir" ] || [ -d "$results_dir" ]; then
-        echo "Note: Previous analysis results exist for $sim"
-        echo "They will be overwritten with new results"
-        read -p "Continue? (y/n): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            echo "Skipping P&L analysis for $sim"
-            return 1
-        fi
+        echo "Note: Overwriting previous analysis results for $sim"
+        rm -rf "$plots_dir" "$results_dir" 2>/dev/null || true
     fi
 
     echo "Running pnl_analysis.py for $sim..."
@@ -181,14 +168,8 @@ run_simulation_pipeline() {
     local report_html="${sim}_analysis_report.html"
 
     if [ -f "$report_md" ] || [ -f "$report_html" ]; then
-        echo "Note: Previous reports exist for $sim"
-        echo "They will be overwritten with new reports"
-        read -p "Continue? (y/n): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            echo "Skipping report generation for $sim"
-            return 1
-        fi
+        echo "Note: Overwriting previous reports for $sim"
+        rm -f "$report_md" "$report_html" 2>/dev/null || true
     fi
 
     echo "Running generate_report.py for $sim..."

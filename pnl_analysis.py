@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import argparse
 from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore')
@@ -10,14 +11,18 @@ warnings.filterwarnings('ignore')
 plt.style.use('seaborn-v0_8-darkgrid')
 sns.set_palette("husl")
 
-def load_combined_data():
+def load_combined_data(data_path=None):
     """Load the combined positions data"""
-    data_path = Path('combined_positions_with_industry.csv')
+    if data_path is None:
+        data_path = Path('combined_positions_with_industry.csv')
+    else:
+        data_path = Path(data_path)
+
     if not data_path.exists():
-        print("Combined data file not found. Run combine_data.py first.")
+        print(f"Combined data file not found at {data_path}. Run combine_data.py first.")
         return None
 
-    print("Loading combined data...")
+    print(f"Loading combined data from {data_path}...")
     df = pd.read_csv(data_path, parse_dates=['date'])
     print(f"Data shape: {df.shape}")
     return df
@@ -119,13 +124,13 @@ def generate_summary_statistics(df, sector_daily):
 
     return sector_summary, daily_total
 
-def create_visualizations(sector_daily, sector_summary, daily_total):
+def create_visualizations(sector_daily, sector_summary, daily_total, simulation='TWOFISH', output_base_dir='outputs'):
     """Create visualizations for P&L analysis"""
+    # Create simulation-specific output directory for plots
+    output_dir = Path(output_base_dir) / simulation / 'pnl_plots'
+    output_dir.mkdir(parents=True, exist_ok=True)
     print("\nGenerating visualizations...")
 
-    # Create output directory for plots
-    output_dir = Path('pnl_plots')
-    output_dir.mkdir(exist_ok=True)
 
     # 1. Daily P&L by Sector (Heatmap)
     plt.figure(figsize=(14, 8))
@@ -137,7 +142,7 @@ def create_visualizations(sector_daily, sector_summary, daily_total):
     plt.imshow(pivot_weekly.T, aspect='auto', cmap='RdYlGn',
                interpolation='nearest', vmin=-100000, vmax=100000)
     plt.colorbar(label='Weekly P&L ($)')
-    plt.title('Weekly P&L Heatmap by Sector', fontsize=14, fontweight='bold')
+    plt.title(f'Weekly P&L Heatmap by Sector ({simulation})', fontsize=14, fontweight='bold')
     plt.ylabel('Sector')
     plt.xlabel('Week')
 
@@ -161,7 +166,7 @@ def create_visualizations(sector_daily, sector_summary, daily_total):
         plt.plot(sector_data['date'], sector_data['cumulative_pnl'],
                 label=sector, linewidth=2, alpha=0.8)
 
-    plt.title('Cumulative P&L by Sector Over Time', fontsize=14, fontweight='bold')
+    plt.title(f'Cumulative P&L by Sector Over Time ({simulation})', fontsize=14, fontweight='bold')
     plt.xlabel('Date')
     plt.ylabel('Cumulative P&L ($)')
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -174,7 +179,7 @@ def create_visualizations(sector_daily, sector_summary, daily_total):
     plt.figure(figsize=(10, 6))
     colors = plt.cm.Set3(np.linspace(0, 1, len(sector_summary)))
     bars = plt.bar(sector_summary['sector'], sector_summary['total_pnl'], color=colors)
-    plt.title('Total P&L by Sector', fontsize=14, fontweight='bold')
+    plt.title(f'Total P&L by Sector ({simulation})', fontsize=14, fontweight='bold')
     plt.xlabel('Sector')
     plt.ylabel('Total P&L ($)')
     plt.xticks(rotation=45, ha='right')
@@ -199,7 +204,7 @@ def create_visualizations(sector_daily, sector_summary, daily_total):
     plt.fill_between(daily_total['date'], daily_total['total_pnl'],
                      where=daily_total['total_pnl'] < 0, color='red', alpha=0.3)
 
-    plt.title('Daily Total P&L', fontsize=14, fontweight='bold')
+    plt.title(f'Daily Total P&L ({simulation})', fontsize=14, fontweight='bold')
     plt.xlabel('Date')
     plt.ylabel('Daily P&L ($)')
     plt.grid(True, alpha=0.3)
@@ -219,7 +224,7 @@ def create_visualizations(sector_daily, sector_summary, daily_total):
         plt.plot(sector_data['date'], abs(sector_data['total_exposure']),
                 label=sector, linewidth=2, alpha=0.7)
 
-    plt.title('Sector Exposure (Absolute) Over Time', fontsize=14, fontweight='bold')
+    plt.title(f'Sector Exposure (Absolute) Over Time ({simulation})', fontsize=14, fontweight='bold')
     plt.xlabel('Date')
     plt.ylabel('Total Exposure ($)')
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -231,10 +236,10 @@ def create_visualizations(sector_daily, sector_summary, daily_total):
 
     print(f"Visualizations saved to '{output_dir}/' directory")
 
-def save_results(sector_daily, sector_summary, daily_total):
+def save_results(sector_daily, sector_summary, daily_total, simulation='TWOFISH', output_base_dir='outputs'):
     """Save analysis results to CSV files"""
-    output_dir = Path('pnl_results')
-    output_dir.mkdir(exist_ok=True)
+    output_dir = Path(output_base_dir) / simulation / 'pnl_results'
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Save sector daily data
     sector_daily.to_csv(output_dir / 'sector_daily_pnl.csv', index=False)
@@ -248,14 +253,35 @@ def save_results(sector_daily, sector_summary, daily_total):
     print(f"\nAnalysis results saved to '{output_dir}/' directory:")
 
 def main():
+    parser = argparse.ArgumentParser(description='P&L analysis by sector')
+    parser.add_argument('--simulation', '-s', default='TWOFISH',
+                        help='Simulation name (default: TWOFISH)')
+    parser.add_argument('--input-file', '-i',
+                        help='Path to combined positions CSV file (default: outputs/{simulation}/combined_positions_with_industry.csv)')
+    parser.add_argument('--output-dir', '-o', default='outputs',
+                        help='Base output directory (default: outputs)')
+
+    args = parser.parse_args()
+
+    # Determine input file path
+    if args.input_file:
+        input_path = args.input_file
+    else:
+        input_path = Path(args.output_dir) / args.simulation / 'combined_positions_with_industry.csv'
+
     print("="*60)
-    print("P&L ANALYSIS BY SECTOR")
+    print(f"P&L ANALYSIS BY SECTOR - {args.simulation}")
     print("="*60)
 
     # Load data
-    df = load_combined_data()
+    df = load_combined_data(input_path)
     if df is None:
-        return
+        # Fallback to legacy location for backward compatibility
+        if args.simulation == 'TWOFISH' and args.output_dir == 'outputs':
+            print("Trying legacy location: combined_positions_with_industry.csv")
+            df = load_combined_data('combined_positions_with_industry.csv')
+        if df is None:
+            return
 
     # Calculate sector P&L
     print("\nCalculating sector P&L...")
@@ -269,13 +295,15 @@ def main():
     sector_summary, daily_total = generate_summary_statistics(df, sector_daily)
 
     # Create visualizations
-    create_visualizations(sector_daily, sector_summary, daily_total)
+    create_visualizations(sector_daily, sector_summary, daily_total,
+                          simulation=args.simulation, output_base_dir=args.output_dir)
 
     # Save results
-    save_results(sector_daily, sector_summary, daily_total)
+    save_results(sector_daily, sector_summary, daily_total,
+                 simulation=args.simulation, output_base_dir=args.output_dir)
 
     print("\n" + "="*60)
-    print("ANALYSIS COMPLETE")
+    print(f"ANALYSIS COMPLETE FOR {args.simulation}")
     print("="*60)
 
 if __name__ == '__main__':
