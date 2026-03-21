@@ -255,7 +255,9 @@ def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insi
     report.append("")
 
     # Write to file
-    report_path = Path(f'{simulation}_analysis_report.md')
+    report_dir = Path(output_dir) / simulation
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / f'{simulation}_analysis_report.md'
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(report))
 
@@ -309,7 +311,7 @@ def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insi
     html_report.append("</body>")
     html_report.append("</html>")
 
-    html_path = Path(f'{simulation}_analysis_report.html')
+    html_path = report_dir / f'{simulation}_analysis_report.html'
     with open(html_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(html_report))
 

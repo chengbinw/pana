@@ -196,12 +196,6 @@ def main():
         merged_df.to_csv(output_path, index=False)
         print(f"\nSaved combined data to: {output_path}")
 
-        # Also save a copy in the root directory for backward compatibility
-        # (only if simulation is TWOFISH and output-dir is 'outputs')
-        if args.simulation == 'TWOFISH' and args.output_dir == 'outputs':
-            legacy_path = Path('combined_positions_with_industry.csv')
-            merged_df.to_csv(legacy_path, index=False)
-            print(f"Also saved to legacy location: {legacy_path} (for backward compatibility)")
 
         # Basic statistics
         print("\n=== Basic Statistics ===")
