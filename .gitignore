@@ -3,6 +3,7 @@ pos/
 combined_positions_with_industry.csv
 
 # Generated analysis outputs
+outputs*/
 pnl_plots/
 pnl_results/
 
