@@ -43,6 +43,22 @@ def load_comparison_data(comparison_dir='outputs/comparison'):
         print(f"Warning: sector_comparison.json not found at {sector_comp_path}")
         data['sector_comparison'] = None
 
+    # Load sector Sharpe comparison (JSON)
+    sector_sharpe_path = comparison_dir / 'sector_sharpe_comparison.json'
+    if sector_sharpe_path.exists():
+        with open(sector_sharpe_path, 'r') as f:
+            sector_sharpe_data = json.load(f)
+        # Convert to DataFrame for easier manipulation
+        sector_sharpe_rows = []
+        for sector, sim_values in sector_sharpe_data.items():
+            row = {'sector': sector}
+            row.update(sim_values)
+            sector_sharpe_rows.append(row)
+        data['sector_sharpe_comparison'] = pd.DataFrame(sector_sharpe_rows)
+    else:
+        print(f"Warning: sector_sharpe_comparison.json not found at {sector_sharpe_path}")
+        data['sector_sharpe_comparison'] = None
+
     # Load correlations
     correlations_path = comparison_dir / 'correlations.csv'
     if correlations_path.exists():
@@ -152,6 +168,46 @@ def generate_comparison_insights(data):
             'average': corr_series.mean()
         }
 
+    # Sector Sharpe ratio insights
+    if data['sector_sharpe_comparison'] is not None and not data['sector_sharpe_comparison'].empty:
+        sharpe_df = data['sector_sharpe_comparison']
+        # Identify simulation columns (exclude 'sector' column)
+        sim_cols = [col for col in sharpe_df.columns if col != 'sector']
+
+        if len(sim_cols) >= 1:
+            insights['sector_sharpe'] = {}
+            # Find best and worst Sharpe ratios per sector
+            for sector in sharpe_df['sector']:
+                row = sharpe_df[sharpe_df['sector'] == sector].iloc[0]
+                values = [row[col] for col in sim_cols]
+                max_val = max(values)
+                min_val = min(values)
+                max_sim = sim_cols[values.index(max_val)]
+                min_sim = sim_cols[values.index(min_val)]
+                diff = max_val - min_val
+
+                insights['sector_sharpe'][sector] = {
+                    'largest_difference': diff,
+                    'best_simulation': max_sim,
+                    'best_value': max_val,
+                    'worst_simulation': min_sim,
+                    'worst_value': min_val
+                }
+
+            # Overall best Sharpe ratios across all sectors
+            best_overall = []
+            for sector in sharpe_df['sector']:
+                row = sharpe_df[sharpe_df['sector'] == sector].iloc[0]
+                for sim in sim_cols:
+                    best_overall.append((sector, sim, row[sim]))
+
+            # Sort by Sharpe ratio descending
+            best_overall.sort(key=lambda x: x[2], reverse=True)
+            insights['sector_sharpe_overall'] = {
+                'top_5': best_overall[:5],
+                'bottom_5': best_overall[-5:] if len(best_overall) >= 5 else best_overall
+            }
+
     return insights
 
 def generate_markdown_report(data, insights, output_dir='outputs/comparison'):
@@ -235,6 +291,53 @@ def generate_markdown_report(data, insights, output_dir='outputs/comparison'):
                 report.append(f"- **{sector}**: {info['best_simulation']} outperformed {info['worst_simulation']} by ${info['largest_difference']:,.2f}")
             report.append("")
 
+    # Sector Sharpe Ratio Comparison
+    if data['sector_sharpe_comparison'] is not None and not data['sector_sharpe_comparison'].empty:
+        report.append("## Sector Sharpe Ratio Comparison")
+        report.append("")
+        report.append("Sharpe ratios measure risk-adjusted performance (higher is better). Annualized with √252 factor, assuming risk-free rate = 0.")
+        report.append("")
+
+        sharpe_df = data['sector_sharpe_comparison']
+        sim_cols = [col for col in sharpe_df.columns if col != 'sector']
+
+        # Create table header
+        header = "| Sector | " + " | ".join(sim_cols) + " |"
+        report.append(header)
+        separator = "|--------|" + "|".join(["---" for _ in sim_cols]) + "|"
+        report.append(separator)
+
+        # Add rows
+        for _, row in sharpe_df.iterrows():
+            values = " | ".join([f"{row[col]:.3f}" for col in sim_cols])
+            report.append(f"| {row['sector']} | {values} |")
+        report.append("")
+
+        # Highlight key insights
+        if 'sector_sharpe' in insights and insights['sector_sharpe']:
+            report.append("### Key Sharpe Ratio Insights")
+            report.append("")
+
+            # Find sectors with largest Sharpe ratio differences
+            sharpe_diffs = []
+            for sector, info in insights['sector_sharpe'].items():
+                sharpe_diffs.append((sector, info['largest_difference']))
+            sharpe_diffs.sort(key=lambda x: abs(x[1]), reverse=True)
+
+            for sector, diff in sharpe_diffs[:3]:  # Top 3 differences
+                info = insights['sector_sharpe'][sector]
+                report.append(f"- **{sector}**: {info['best_simulation']} has best Sharpe ratio ({info['best_value']:.3f}) vs {info['worst_simulation']} ({info['worst_value']:.3f})")
+            report.append("")
+
+            # Top 5 overall Sharpe ratios
+            if 'sector_sharpe_overall' in insights:
+                overall = insights['sector_sharpe_overall']
+                report.append("### Top 5 Risk-Adjusted Performances")
+                report.append("")
+                for i, (sector, sim, value) in enumerate(overall['top_5'], 1):
+                    report.append(f"{i}. **{sector}** ({sim}): {value:.3f}")
+                report.append("")
+
     # Correlation Analysis
     if data['correlations'] is not None and not data['correlations'].empty:
         report.append("## Correlation Analysis")
@@ -299,9 +402,17 @@ def generate_markdown_report(data, insights, output_dir='outputs/comparison'):
         max_diff_info = insights['sector'][max_diff_sector]
         report.append(f"5. **Sector Divergence**: The largest performance difference occurred in {max_diff_sector} sector, where {max_diff_info['best_simulation']} outperformed {max_diff_info['worst_simulation']} by ${max_diff_info['largest_difference']:,.2f}.")
 
+    if 'sector_sharpe' in insights and insights['sector_sharpe']:
+        # Find sector with largest Sharpe ratio difference
+        sharpe_diffs = [(sector, info['largest_difference']) for sector, info in insights['sector_sharpe'].items()]
+        if sharpe_diffs:
+            max_sharpe_diff_sector = max(sharpe_diffs, key=lambda x: abs(x[1]))[0]
+            max_sharpe_info = insights['sector_sharpe'][max_sharpe_diff_sector]
+            report.append(f"6. **Risk-Adjusted Sector Performance**: {max_sharpe_info['best_simulation']} achieved the best Sharpe ratio in {max_sharpe_diff_sector} sector ({max_sharpe_info['best_value']:.3f}), indicating superior risk-adjusted returns in that sector.")
+
     if 'correlations' in insights:
         corr = insights['correlations']
-        report.append(f"6. **Return Correlation**: Simulation pairs show an average correlation of {corr['average']:.3f}, indicating {'similar' if corr['average'] > 0.5 else 'divergent'} return patterns.")
+        report.append(f"7. **Return Correlation**: Simulation pairs show an average correlation of {corr['average']:.3f}, indicating {'similar' if corr['average'] > 0.5 else 'divergent'} return patterns.")
 
     report.append("")
 
@@ -322,6 +433,9 @@ def generate_markdown_report(data, insights, output_dir='outputs/comparison'):
     if 'sector' in insights and insights['sector']:
         report.append(f"4. **Sector Analysis**: Investigate sector-level differences to understand drivers of performance divergence.")
         report.append(f"5. **Portfolio Construction**: Consider blending strategies based on sector strengths to optimize overall portfolio performance.")
+
+    if 'sector_sharpe' in insights and insights['sector_sharpe']:
+        report.append(f"6. **Risk-Adjusted Sector Focus**: Review sector Sharpe ratios to identify which simulations deliver superior risk-adjusted returns in specific sectors for targeted strategy improvements.")
 
     report.append("")
 

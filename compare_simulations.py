@@ -124,7 +124,25 @@ def calculate_comparison_metrics(sector_daily_dict, sector_summary_dict, daily_t
 
         sector_comparison[sector] = sector_data
 
-    # 3. Risk metrics comparison
+    # 3. Sector Sharpe ratio comparison
+    sector_sharpe_comparison = {}
+    all_sectors = set()
+    for sim, summary in sector_summary_dict.items():
+        if summary is not None and not summary.empty:
+            all_sectors.update(summary['sector'].unique())
+
+    for sector in all_sectors:
+        sector_data = {}
+        for sim, summary in sector_summary_dict.items():
+            if summary is not None and not summary.empty:
+                sector_row = summary[summary['sector'] == sector]
+                if not sector_row.empty:
+                    sector_data[sim] = sector_row.iloc[0]['sharpe_ratio']
+                else:
+                    sector_data[sim] = 0
+        sector_sharpe_comparison[sector] = sector_data
+
+    # 4. Risk metrics comparison
     risk_metrics = []
     for sim, daily in sector_daily_dict.items():
         if daily is not None and not daily.empty:
@@ -160,7 +178,7 @@ def calculate_comparison_metrics(sector_daily_dict, sector_summary_dict, daily_t
 
     risk_metrics_df = pd.DataFrame(risk_metrics)
 
-    # 4. Correlation analysis between daily returns
+    # 5. Correlation analysis between daily returns
     correlation_data = {}
     if len(sector_daily_dict) >= 2:
         # Get common dates first
@@ -191,6 +209,7 @@ def calculate_comparison_metrics(sector_daily_dict, sector_summary_dict, daily_t
     return {
         'total_pnl_comparison': total_pnl_df,
         'sector_comparison': sector_comparison,
+        'sector_sharpe_comparison': sector_sharpe_comparison,
         'risk_metrics': risk_metrics_df,
         'correlations': correlation_data,
         'comparison_metrics': comparison_metrics
@@ -250,7 +269,33 @@ def generate_comparison_visualizations(comparison_results, simulations, sector_d
             plt.savefig(output_dir / 'sector_pnl_comparison.png', dpi=150, bbox_inches='tight')
             plt.close()
 
-    # 3. Cumulative P&L Overlay Line Chart
+    # 3. Sector Sharpe Ratio Comparison
+    if 'sector_sharpe_comparison' in comparison_results and comparison_results['sector_sharpe_comparison']:
+        sector_sharpe_comp = comparison_results['sector_sharpe_comparison']
+        sectors = list(sector_sharpe_comp.keys())
+
+        if sectors and len(simulations) >= 2:
+            # Prepare data for grouped bar chart
+            x = np.arange(len(sectors))
+            width = 0.8 / len(simulations)
+
+            plt.figure(figsize=(14, 8))
+
+            for i, sim in enumerate(simulations):
+                values = [sector_sharpe_comp[sector].get(sim, 0) for sector in sectors]
+                plt.bar(x + i*width - width*(len(simulations)-1)/2, values,
+                       width=width, label=sim, alpha=0.8)
+
+            plt.title('Sector Sharpe Ratio Comparison Across Simulations', fontsize=14, fontweight='bold')
+            plt.xlabel('Sector')
+            plt.ylabel('Sharpe Ratio (annualized)')
+            plt.xticks(x, sectors, rotation=45, ha='right')
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(output_dir / 'sector_sharpe_comparison.png', dpi=150, bbox_inches='tight')
+            plt.close()
+
+    # 4. Cumulative P&L Overlay Line Chart
     if len(simulations) >= 2 and sector_daily_dict:
         plt.figure(figsize=(12, 6))
 
@@ -282,7 +327,7 @@ def generate_comparison_visualizations(comparison_results, simulations, sector_d
         plt.savefig(output_dir / 'cumulative_pnl_comparison.png', dpi=150, bbox_inches='tight')
         plt.close()
 
-    # 4. Risk Metrics Radar Chart (or grouped bar chart)
+    # 5. Risk Metrics Radar Chart (or grouped bar chart)
     if 'risk_metrics' in comparison_results and not comparison_results['risk_metrics'].empty:
         df = comparison_results['risk_metrics']
 
@@ -313,7 +358,7 @@ def generate_comparison_visualizations(comparison_results, simulations, sector_d
         plt.savefig(output_dir / 'risk_metrics_comparison.png', dpi=150, bbox_inches='tight')
         plt.close()
 
-    # 5. Correlation Heatmap
+    # 6. Correlation Heatmap
     if 'correlations' in comparison_results and comparison_results['correlations']:
         correlations = comparison_results['correlations']
 
@@ -374,6 +419,19 @@ def save_comparison_results(comparison_results, output_dir):
 
         with open(output_dir / 'sector_comparison.json', 'w') as f:
             json.dump(serializable_sector_comp, f, indent=2)
+
+    # Save sector Sharpe comparison as JSON (since it's nested)
+    if 'sector_sharpe_comparison' in comparison_results and comparison_results['sector_sharpe_comparison']:
+        import json
+        sector_sharpe_comp = comparison_results['sector_sharpe_comparison']
+
+        # Convert to serializable format
+        serializable_sector_sharpe_comp = {}
+        for sector, sim_data in sector_sharpe_comp.items():
+            serializable_sector_sharpe_comp[str(sector)] = {str(k): float(v) for k, v in sim_data.items()}
+
+        with open(output_dir / 'sector_sharpe_comparison.json', 'w') as f:
+            json.dump(serializable_sector_sharpe_comp, f, indent=2)
 
     # Save correlation data
     if 'correlations' in comparison_results and comparison_results['correlations']:

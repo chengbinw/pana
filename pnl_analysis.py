@@ -99,11 +99,35 @@ def generate_summary_statistics(df, sector_daily):
         'total_exposure': 'mean'
     }).reset_index()
 
+    # Calculate Sharpe ratio per sector
+    sharpe_ratios = []
+    for sector in sector_daily['sector'].unique():
+        sector_data = sector_daily[sector_daily['sector'] == sector]
+        daily_pnl = sector_data['total_pnl']
+        if len(daily_pnl) < 2:
+            sharpe = 0
+        else:
+            mean_return = daily_pnl.mean()
+            std_return = daily_pnl.std()
+            if std_return != 0:
+                sharpe = mean_return / std_return * np.sqrt(252)
+            else:
+                sharpe = 0
+        sharpe_ratios.append({'sector': sector, 'sharpe_ratio': sharpe})
+
+    sharpe_df = pd.DataFrame(sharpe_ratios)
+    sector_summary = pd.merge(sector_summary, sharpe_df, on='sector', how='left')
+
     sector_summary = sector_summary.sort_values('total_pnl', ascending=False)
 
     print(f"\nSector Performance (Total P&L):")
     for _, row in sector_summary.iterrows():
-        print(f"  {row['sector']:30} ${row['total_pnl']:12,.2f} (avg exposure: ${row['total_exposure']:,.0f})")
+        print(f"  {row['sector']:30} ${row['total_pnl']:12,.2f} (avg exposure: ${row['total_exposure']:,.0f}, Sharpe: {row['sharpe_ratio']:.2f})")
+
+    print(f"\nSector Sharpe Ratios (annualized, risk-free rate=0):")
+    sector_summary_sharpe = sector_summary.sort_values('sharpe_ratio', ascending=False)
+    for _, row in sector_summary_sharpe.iterrows():
+        print(f"  {row['sector']:30} {row['sharpe_ratio']:6.2f}")
 
     # Best and worst days
     daily_total = sector_daily.groupby('date')['total_pnl'].sum().reset_index()

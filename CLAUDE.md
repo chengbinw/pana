@@ -58,6 +58,15 @@ run_analysis.bat TWOFISH                     # Windows CMD
 # Run comparison on existing results
 python compare_simulations.py bye byd --output-base-dir outputs
 python generate_comparison_report.py --comparison-dir outputs/comparison
+
+# Check sector Sharpe ratio comparison
+python -c "
+import json;
+with open('outputs/comparison/sector_sharpe_comparison.json') as f:
+    data = json.load(f);
+for sector, sims in data.items():
+    print(f'{sector:30} {str(sims)}')
+"
 ```
 
 **Install dependencies (if missing):**
@@ -75,6 +84,15 @@ python -c "import pandas as pd; df = pd.read_csv('outputs/TWOFISH/combined_posit
 python pnl_analysis.py --simulation TWOFISH --output-dir outputs
 ```
 
+**Check sector Sharpe ratios for a simulation:**
+```bash
+python -c "
+import pandas as pd;
+df = pd.read_csv('outputs/TWOFISH/pnl_results/sector_summary.csv');
+print(df[['sector', 'total_pnl', 'sharpe_ratio']].sort_values('sharpe_ratio', ascending=False))
+"
+```
+
 ## Architecture
 
 ### Five-Stage Pipeline (Single or Multi-Simulation)
@@ -90,6 +108,7 @@ python pnl_analysis.py --simulation TWOFISH --output-dir outputs
    - Loads combined data for a specific simulation
    - Calculates daily P&L aggregated by sector
    - Computes cumulative P&L, rolling metrics, exposure
+   - **Calculates annualized Sharpe ratios per sector** (risk-free rate = 0, √252 annualization)
    - Generates visualizations in `outputs/{SIMULATION}/pnl_plots/`
    - Saves intermediate results to `outputs/{SIMULATION}/pnl_results/`
 
@@ -108,9 +127,10 @@ python pnl_analysis.py --simulation TWOFISH --output-dir outputs
    - Saves comparison data to `outputs/comparison/`
 
 5. **Comparison Reporting** (`generate_comparison_report.py`):
-   - Loads comparison results
+   - Loads comparison results including sector Sharpe ratio comparisons
    - Generates comprehensive comparison report with insights
    - Creates markdown and HTML comparison reports
+   - **Includes sector Sharpe ratio analysis and rankings**
    - Output: `outputs/comparison/comparison_report.{md,html}`
 
 ### Data Flow (Multi-Simulation)
@@ -142,8 +162,8 @@ simulation2/pos/ePos_TWOFISH_*.csv + Industry.csv
 
 - **Comparison Directories:**
   - `outputs/comparison/`: Comparative analysis results
-  - `outputs/comparison/comparison_plots/`: Comparative visualizations
-  - `outputs/comparison/comparison_data/`: Comparison metrics and data
+  - `outputs/comparison/comparison_plots/`: Comparative visualizations (including `sector_sharpe_comparison.png`)
+  - `outputs/comparison/comparison_data/`: Comparison metrics and data (CSV and JSON files)
 
 ## Data Structure
 
@@ -181,6 +201,15 @@ The merged dataset includes all position columns plus:
 - `sector_code`: First two digits of `newIndustry`
 - `sector`: Mapped sector name (based on corrected mapping)
 
+### Comparison Data Files
+- **`sector_sharpe_comparison.json`**: Sector-level Sharpe ratio comparisons across simulations
+  - Format: `{sector: {simulation1: sharpe_ratio, simulation2: sharpe_ratio, ...}}`
+  - Used for risk-adjusted performance analysis across sectors
+- **`sector_comparison.json`**: Sector-level total P&L comparisons across simulations
+- **`total_pnl_comparison.csv`**: Total P&L comparison across simulations
+- **`risk_metrics_comparison.csv`**: Risk metrics comparison (volatility, Sharpe ratio, max drawdown, win rate)
+- **`correlations.csv`**: Correlation matrix between simulation returns
+
 ## Key Implementation Details
 
 ### P&L Calculation
@@ -188,6 +217,12 @@ The merged dataset includes all position columns plus:
 - **Sector aggregation:** Group by `date` and `sector`, sum `pl`
 - **Exposure:** `Mark * Quantity` (absolute value for percentage calculations)
 - **Cumulative P&L:** `cumsum()` within each sector
+
+### Sharpe Ratio Calculation
+- **Annualized Sharpe:** `mean_return / std_return * √252` (assuming risk-free rate = 0)
+- **Sector-level:** Calculated per sector using daily P&L returns
+- **Edge cases:** Handles single data point (Sharpe = 0) and zero standard deviation (Sharpe = 0)
+- **Comparison:** Sector Sharpe ratios compared across simulations in comparative analysis
 
 ### Visualization Types
 1. **Weekly P&L Heatmap:** Sector performance over time (resampled weekly)
@@ -199,6 +234,7 @@ The merged dataset includes all position columns plus:
 ### Report Insights
 - Top/bottom 10 symbols by P&L
 - Sector win rates (days with positive P&L)
+- **Sector Sharpe ratios** (annualized risk-adjusted performance)
 - Maximum drawdown analysis
 - Monthly performance breakdown
 - Latest exposure concentration
@@ -206,10 +242,11 @@ The merged dataset includes all position columns plus:
 ### Comparison Metrics (Multi-Simulation)
 - **Total P&L Comparison:** Absolute and percentage differences between simulations
 - **Sector Performance Deltas:** Sector-by-sector performance differences
+- **Sector Sharpe Ratio Comparison:** Risk-adjusted performance comparison across sectors
 - **Risk Metrics Comparison:** Volatility, Sharpe ratio, max drawdown, win rates
 - **Correlation Analysis:** Daily return correlations between simulation pairs
 - **Statistical Significance:** Performance difference significance testing
-- **Visual Comparisons:** Side-by-side bar charts, overlay line charts, heatmaps, scatter plots
+- **Visual Comparisons:** Side-by-side bar charts, overlay line charts, heatmaps, scatter plots, sector Sharpe ratio charts
 
 ### Command-Line Interface
 All scripts support command-line arguments for flexible execution:
