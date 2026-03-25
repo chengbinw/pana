@@ -6,7 +6,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 def load_data(simulation='TWOFISH', output_dir='outputs'):
-    """Load all necessary data"""
+    """Load all necessary data including sector and bizsector results"""
     # Try simulation-specific location first
     combined_path = Path(output_dir) / simulation / 'combined_positions_with_industry.csv'
     results_dir = Path(output_dir) / simulation / 'pnl_results'
@@ -18,29 +18,41 @@ def load_data(simulation='TWOFISH', output_dir='outputs'):
             results_dir = Path('pnl_results')
         else:
             print(f"Combined data not found at {combined_path}")
-            return None, None, None, None
+            return None, None, None, None, None, None
 
     if not combined_path.exists():
         print("Combined data not found")
-        return None, None, None, None
+        return None, None, None, None, None, None
 
     print(f"Loading combined data from {combined_path}")
     df = pd.read_csv(combined_path, parse_dates=['date'])
 
-    # Load analysis results
+    # Load sector analysis results
     sector_daily_path = results_dir / 'sector_daily_pnl.csv'
     sector_summary_path = results_dir / 'sector_summary.csv'
     daily_total_path = results_dir / 'daily_total_pnl.csv'
 
     if not sector_daily_path.exists():
         print(f"Analysis results not found at {results_dir}")
-        return None, None, None, None
+        return None, None, None, None, None, None
 
     sector_daily = pd.read_csv(sector_daily_path, parse_dates=['date'])
     sector_summary = pd.read_csv(sector_summary_path)
     daily_total = pd.read_csv(daily_total_path, parse_dates=['date'])
 
-    return df, sector_daily, sector_summary, daily_total
+    # Load bizsector analysis results if they exist
+    bizsector_daily_path = results_dir / 'bizsector_daily_pnl.csv'
+    bizsector_summary_path = results_dir / 'bizsector_summary.csv'
+
+    bizsector_daily = None
+    bizsector_summary = None
+
+    if bizsector_daily_path.exists():
+        bizsector_daily = pd.read_csv(bizsector_daily_path, parse_dates=['date'])
+    if bizsector_summary_path.exists():
+        bizsector_summary = pd.read_csv(bizsector_summary_path)
+
+    return df, sector_daily, sector_summary, daily_total, bizsector_daily, bizsector_summary
 
 def calculate_additional_metrics(df, sector_daily):
     """Calculate additional insights and metrics"""
@@ -118,8 +130,51 @@ def calculate_additional_metrics(df, sector_daily):
 
     return insights
 
-def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insights, simulation='TWOFISH', output_dir='outputs'):
-    """Generate a comprehensive markdown report"""
+def calculate_bizsector_additional_metrics(df, bizsector_daily):
+    """Calculate additional insights and metrics for bizsector"""
+    if bizsector_daily is None:
+        return {}
+
+    insights = {}
+
+    # Bizsector correlations
+    pivot_pnl = bizsector_daily.pivot(index='date', columns='bizsector', values='total_pnl')
+    bizsector_corr = pivot_pnl.corr()
+    insights['bizsector_correlation'] = bizsector_corr
+
+    # Win rate by bizsector (days with positive P&L)
+    bizsector_win_rate = []
+    for bizsector in bizsector_daily['bizsector'].unique():
+        bizsector_data = bizsector_daily[bizsector_daily['bizsector'] == bizsector]
+        win_days = (bizsector_data['total_pnl'] > 0).sum()
+        total_days = len(bizsector_data)
+        win_rate = win_days / total_days * 100 if total_days > 0 else 0
+        bizsector_win_rate.append({
+            'bizsector': bizsector,
+            'win_rate': win_rate,
+            'win_days': win_days,
+            'total_days': total_days
+        })
+
+    insights['bizsector_win_rate'] = pd.DataFrame(bizsector_win_rate)
+
+    # Exposure concentration by bizsector
+    latest_date = df['date'].max()
+    latest_data = df[df['date'] == latest_date]
+    total_exposure_latest = (latest_data['Mark'] * latest_data['Quantity']).abs().sum()
+
+    bizsector_exposure_latest = latest_data.groupby('bizsector').apply(
+        lambda x: (x['Mark'] * x['Quantity']).abs().sum()
+    ).reset_index(name='exposure')
+
+    bizsector_exposure_latest['exposure_pct'] = bizsector_exposure_latest['exposure'] / total_exposure_latest * 100
+    insights['bizsector_latest_exposure'] = bizsector_exposure_latest.sort_values('exposure_pct', ascending=False)
+
+    return insights
+
+def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insights, simulation='TWOFISH', output_dir='outputs',
+                              bizsector_summary=None, bizsector_insights=None):
+    """Generate a comprehensive markdown report including sector and bizsector analysis"""
     report = []
     report.append(f"# Position Analysis Report - {simulation}")
     report.append(f"*Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}*")
@@ -155,6 +210,19 @@ def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insi
         report.append(f"| {row['sector']} | ${row['total_pnl']:,.2f} | ${row['total_exposure']:,.0f} |")
     report.append("")
 
+    # 2b. Bizsector Performance (if available)
+    if bizsector_summary is not None:
+        report.append("## Bizsector Performance")
+        report.append("")
+
+        bizsector_summary_sorted = bizsector_summary.sort_values('total_pnl', ascending=False)
+        report.append("| Bizsector | Total P&L | Avg Exposure | Sharpe Ratio |")
+        report.append("|-----------|-----------|--------------|--------------|")
+        for _, row in bizsector_summary_sorted.iterrows():
+            sharpe_str = f"{row['sharpe_ratio']:.2f}" if 'sharpe_ratio' in row else "N/A"
+            report.append(f"| {row['bizsector']} | ${row['total_pnl']:,.2f} | ${row['total_exposure']:,.0f} | {sharpe_str} |")
+        report.append("")
+
     # 3. Top Performing Symbols
     report.append("## Top 10 Performing Symbols")
     report.append("")
@@ -184,6 +252,17 @@ def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insi
     for _, row in insights['sector_win_rate'].iterrows():
         report.append(f"| {row['sector']} | {row['win_rate']:.1f}% | {row['win_days']} | {row['total_days']} |")
     report.append("")
+
+    # 5b. Win Rate by Bizsector (if available)
+    if bizsector_insights is not None and 'bizsector_win_rate' in bizsector_insights:
+        report.append("## Win Rate by Bizsector")
+        report.append("")
+
+        report.append("| Bizsector | Win Rate (%) | Winning Days | Total Days |")
+        report.append("|-----------|--------------|--------------|------------|")
+        for _, row in bizsector_insights['bizsector_win_rate'].iterrows():
+            report.append(f"| {row['bizsector']} | {row['win_rate']:.1f}% | {row['win_days']} | {row['total_days']} |")
+        report.append("")
 
     # 6. Drawdown Analysis
     report.append("## Drawdown Analysis")
@@ -215,6 +294,18 @@ def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insi
         report.append(f"| {row['sector']} | ${row['exposure']:,.0f} | {row['exposure_pct']:.1f}% |")
     report.append("")
 
+    # 8b. Latest Exposure by Bizsector (if available)
+    if bizsector_insights is not None and 'bizsector_latest_exposure' in bizsector_insights:
+        report.append("## Latest Exposure by Bizsector")
+        report.append(f"*As of {df['date'].max().date()}*")
+        report.append("")
+
+        report.append("| Bizsector | Exposure | % of Total |")
+        report.append("|-----------|----------|------------|")
+        for _, row in bizsector_insights['bizsector_latest_exposure'].iterrows():
+            report.append(f"| {row['bizsector']} | ${row['exposure']:,.0f} | {row['exposure_pct']:.1f}% |")
+        report.append("")
+
     # 9. Visualizations
     report.append("## Visualizations")
     report.append("")
@@ -226,6 +317,11 @@ def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insi
     report.append(f"3. **Total P&L by Sector** - `{output_dir}/{simulation}/pnl_plots/total_pnl_by_sector.png`")
     report.append(f"4. **Daily Total P&L** - `{output_dir}/{simulation}/pnl_plots/daily_total_pnl.png`")
     report.append(f"5. **Sector Exposure Over Time** - `{output_dir}/{simulation}/pnl_plots/sector_exposure_over_time.png`")
+    if bizsector_summary is not None:
+        report.append(f"6. **Weekly P&L Heatmap by Bizsector** - `{output_dir}/{simulation}/bizsector_plots/weekly_pnl_heatmap_bizsector.png`")
+        report.append(f"7. **Cumulative P&L by Bizsector** - `{output_dir}/{simulation}/bizsector_plots/cumulative_pnl_by_bizsector.png`")
+        report.append(f"8. **Total P&L by Bizsector** - `{output_dir}/{simulation}/bizsector_plots/total_pnl_by_bizsector.png`")
+        report.append(f"9. **Bizsector Exposure Over Time** - `{output_dir}/{simulation}/bizsector_plots/bizsector_exposure_over_time.png`")
     report.append("")
 
     # 10. Data Files
@@ -236,6 +332,9 @@ def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insi
     report.append(f"- **Sector Daily P&L**: `{output_dir}/{simulation}/pnl_results/sector_daily_pnl.csv`")
     report.append(f"- **Sector Summary**: `{output_dir}/{simulation}/pnl_results/sector_summary.csv`")
     report.append(f"- **Daily Total P&L**: `{output_dir}/{simulation}/pnl_results/daily_total_pnl.csv`")
+    if bizsector_summary is not None:
+        report.append(f"- **Bizsector Daily P&L**: `{output_dir}/{simulation}/pnl_results/bizsector_daily_pnl.csv`")
+        report.append(f"- **Bizsector Summary**: `{output_dir}/{simulation}/pnl_results/bizsector_summary.csv`")
     report.append("")
 
     # 11. Key Insights
@@ -252,6 +351,18 @@ def generate_markdown_report(df, sector_daily, sector_summary, daily_total, insi
     report.append(f"4. The portfolio experienced maximum drawdown of ${insights['max_drawdown']:,.2f} on {insights['max_drawdown_date'].date()}.")
     report.append("5. Real Estate sector had the most consistent performance (lowest volatility).")
     report.append("6. Information Technology sector had the highest P&L volatility.")
+
+    # Add bizsector insights if available
+    if bizsector_summary is not None:
+        bizsector_summary_sorted = bizsector_summary.sort_values('total_pnl', ascending=False)
+        best_bizsector = bizsector_summary_sorted.iloc[0]
+        worst_bizsector = bizsector_summary_sorted.iloc[-1]
+        report.append(f"7. **{best_bizsector['bizsector']}** was the best performing bizsector with total P&L of ${best_bizsector['total_pnl']:,.2f}.")
+        report.append(f"8. **{worst_bizsector['bizsector']}** was the worst performing bizsector with total P&L of ${worst_bizsector['total_pnl']:,.2f}.")
+        if 'sharpe_ratio' in best_bizsector:
+            sharpe_sorted = bizsector_summary.sort_values('sharpe_ratio', ascending=False)
+            best_sharpe_bizsector = sharpe_sorted.iloc[0]
+            report.append(f"9. **{best_sharpe_bizsector['bizsector']}** had the highest risk-adjusted performance (Sharpe ratio: {best_sharpe_bizsector['sharpe_ratio']:.2f}).")
     report.append("")
 
     # Write to file
@@ -333,7 +444,7 @@ def main():
     print("Generating comprehensive report...")
 
     # Load data
-    df, sector_daily, sector_summary, daily_total = load_data(args.simulation, args.output_dir)
+    df, sector_daily, sector_summary, daily_total, bizsector_daily, bizsector_summary = load_data(args.simulation, args.output_dir)
     if df is None:
         return
 
@@ -341,10 +452,17 @@ def main():
     print("Calculating additional metrics...")
     insights = calculate_additional_metrics(df, sector_daily)
 
+    # Calculate bizsector insights if bizsector data available
+    bizsector_insights = {}
+    if bizsector_daily is not None:
+        print("Calculating bizsector metrics...")
+        bizsector_insights = calculate_bizsector_additional_metrics(df, bizsector_daily)
+
     # Generate reports
     print("Generating markdown and HTML reports...")
     generate_markdown_report(df, sector_daily, sector_summary, daily_total, insights,
-                             simulation=args.simulation, output_dir=args.output_dir)
+                             simulation=args.simulation, output_dir=args.output_dir,
+                             bizsector_summary=bizsector_summary, bizsector_insights=bizsector_insights)
 
     print("\nReport generation complete!")
 

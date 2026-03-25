@@ -10,11 +10,12 @@ This project processes End-of-Day (EOD) position CSV files, merges them with ind
 
 - **Multi-Simulation Support**: Process one or more simulation datasets (e.g., TWOFISH, BLOWFISH, bye, byd)
 - **Data Combination**: Combines daily position files into simulation-specific datasets
-- **Industry Mapping**: Maps stock symbols to sectors using industry codes (corrected: 55=Financials, 56=Health Care)
-- **P&L Analysis**: Calculates daily and cumulative P&L by sector for each simulation
+- **Industry Mapping**: Maps stock symbols to sectors (2-digit industry codes) and bizsectors (4-digit industry groups) using hierarchical industry classification
+- **Bizsector Analysis**: Additional granular analysis at 4-digit industry group (bizsector) level
+- **P&L Analysis**: Calculates daily and cumulative P&L by sector and bizsector (industry group) for each simulation
 - **Visualizations**: Generates heatmaps, line charts, and bar charts for individual simulations
 - **Report Generation**: Creates detailed markdown and HTML reports for each simulation
-- **Comparative Analysis**: Compares performance across multiple simulations with side-by-side metrics
+- **Comparative Analysis**: Compares performance across multiple simulations with side-by-side metrics at both sector and bizsector levels
 - **Comparative Visualizations**: Generates comparison charts, heatmaps, and correlation plots
 - **Comprehensive Reporting**: Produces comparative analysis reports with insights and recommendations
 
@@ -127,33 +128,36 @@ All runners validate Python and package dependencies before starting and support
 ## Outputs
 
 ### Per Simulation Outputs
-- `outputs/{SIMULATION}/combined_positions_with_industry.csv`: Combined dataset
-- `outputs/{SIMULATION}/pnl_plots/`: Visualization images (PNG)
-- `outputs/{SIMULATION}/pnl_results/`: Intermediate analysis results (CSV)
-- `outputs/{SIMULATION}/{SIMULATION}_analysis_report.{md,html}`: Comprehensive reports
+- `outputs/{SIMULATION}/combined_positions_with_industry.csv`: Combined dataset with sector and bizsector columns
+- `outputs/{SIMULATION}/pnl_plots/`: Sector-level visualization images (PNG)
+- `outputs/{SIMULATION}/bizsector_plots/`: Bizsector-level visualization images (PNG)
+- `outputs/{SIMULATION}/pnl_results/`: Intermediate analysis results (CSV) including sector and bizsector metrics
+- `outputs/{SIMULATION}/{SIMULATION}_analysis_report.{md,html}`: Comprehensive reports with sector and bizsector insights
 
 ### Comparison Outputs (when using `--compare`)
 - `outputs/comparison/`: Comparative analysis directory
-- `outputs/comparison/comparison_plots/`: Comparative visualizations
-- `outputs/comparison/comparison_data/`: Comparison metrics and data
-- `outputs/comparison/comparison_report.{md,html}`: Comprehensive comparison report
+- `outputs/comparison/comparison_plots/`: Comparative visualizations including sector and bizsector comparisons
+- `outputs/comparison/comparison_data/`: Comparison metrics and data including sector and bizsector JSON files
+- `outputs/comparison/comparison_report.{md,html}`: Comprehensive comparison report with sector and bizsector analysis
 
 ### Example Output Structure
 ```
 outputs/
 ├── TWOFISH/
 │   ├── combined_positions_with_industry.csv
-│   ├── pnl_results/
-│   ├── pnl_plots/
+│   ├── pnl_results/           # Contains sector_*.csv and bizsector_*.csv files
+│   ├── pnl_plots/             # Sector-level visualizations
+│   ├── bizsector_plots/       # Bizsector-level visualizations
 │   └── TWOFISH_analysis_report.{md,html}
 ├── BLOWFISH/
 │   ├── combined_positions_with_industry.csv
-│   ├── pnl_results/
-│   ├── pnl_plots/
+│   ├── pnl_results/           # Contains sector_*.csv and bizsector_*.csv files
+│   ├── pnl_plots/             # Sector-level visualizations
+│   ├── bizsector_plots/       # Bizsector-level visualizations
 │   └── BLOWFISH_analysis_report.{md,html}
 └── comparison/
-    ├── comparison_plots/
-    ├── comparison_data/
+    ├── comparison_plots/      # Includes sector and bizsector comparison charts
+    ├── comparison_data/       # Includes sector_*.json and bizsector_*.json files
     └── comparison_report.{md,html}
 ```
 

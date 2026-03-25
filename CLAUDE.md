@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This repository contains a financial position analysis pipeline for processing daily stock position files from multiple simulations. The system reads EOD position CSVs for one or more simulations, merges them with industry sector mappings, calculates P&L by sector, generates visualizations and reports, and provides comparative analysis between simulations.
+This repository contains a financial position analysis pipeline for processing daily stock position files from multiple simulations. The system reads EOD position CSVs for one or more simulations, merges them with industry sector mappings, calculates P&L by sector and bizsector (4-digit industry group), generates visualizations and reports, and provides comparative analysis between simulations at both sector and bizsector levels.
 
 The analysis is implemented in a five-script pipeline supporting single-simulation analysis and multi-simulation comparison.
 
@@ -192,6 +192,22 @@ simulation2/pos/ePos_TWOFISH_*.csv + Industry.csv
   - `57`: Information Technology, `58`: Communication Services
   - `59`: Utilities, `60`: Real Estate
   - Unmapped codes default to 'Other'
+- **Bizsector mapping** (first four digits, industry groups):
+  - Examples: `5310`: "Automobiles & Components", `5320`: "Consumer Durables & Apparel"
+  - `5330`: "Consumer Services", `5340`: "Retailing"
+  - `5410`: "Food, Beverage & Tobacco", `5420`: "Household & Personal Products"
+  - `5430`: "Food & Staples Retailing", `5440`: "Industrial Conglomerates"
+  - `5010`: "Oil, Gas & Consumable Fuels", `5020`: "Renewable Energy"
+  - `5510`: "Financial Services", `5530`: "Insurance"
+  - `5550`: "Private Equity", `5610`: "Health Care Equipment & Services"
+  - `5620`: "Pharmaceuticals & Biotechnology", `5210`: "Capital Goods"
+  - `5220`: "Commercial & Professional Services", `5240`: "Transportation"
+  - `5710`: "Technology Hardware & Equipment", `5720`: "Software & Services"
+  - `5730`: "Financial Technology", `5740`: "Telecommunications"
+  - `5110`: "Chemicals", `5120`: "Construction Materials"
+  - `5130`: "Containers & Packaging", `6010`: "Real Estate Investment Trusts (REITs)"
+  - `5910`: "Electric Utilities"
+  - Unmapped bizsector codes default to 'Other'
 
 ### Combined Data Schema
 The merged dataset includes all position columns plus:
@@ -200,12 +216,18 @@ The merged dataset includes all position columns plus:
 - `symbol`, `origIndustry`, `newIndustry`: From industry mapping
 - `sector_code`: First two digits of `newIndustry`
 - `sector`: Mapped sector name (based on corrected mapping)
+- `bizsector_code`: First four digits of `newIndustry`
+- `bizsector`: Mapped bizsector name (industry group)
 
 ### Comparison Data Files
 - **`sector_sharpe_comparison.json`**: Sector-level Sharpe ratio comparisons across simulations
   - Format: `{sector: {simulation1: sharpe_ratio, simulation2: sharpe_ratio, ...}}`
   - Used for risk-adjusted performance analysis across sectors
 - **`sector_comparison.json`**: Sector-level total P&L comparisons across simulations
+- **`bizsector_sharpe_comparison.json`**: Bizsector-level Sharpe ratio comparisons across simulations
+  - Format: `{bizsector: {simulation1: sharpe_ratio, simulation2: sharpe_ratio, ...}}`
+  - Used for risk-adjusted performance analysis across industry groups
+- **`bizsector_comparison.json`**: Bizsector-level total P&L comparisons across simulations
 - **`total_pnl_comparison.csv`**: Total P&L comparison across simulations
 - **`risk_metrics_comparison.csv`**: Risk metrics comparison (volatility, Sharpe ratio, max drawdown, win rate)
 - **`correlations.csv`**: Correlation matrix between simulation returns
@@ -215,14 +237,16 @@ The merged dataset includes all position columns plus:
 ### P&L Calculation
 - **Unrealized P&L:** Uses `pl` column from source data (`(Mark - CMark) * Quantity`)
 - **Sector aggregation:** Group by `date` and `sector`, sum `pl`
+- **Bizsector aggregation:** Group by `date` and `bizsector`, sum `pl`
 - **Exposure:** `Mark * Quantity` (absolute value for percentage calculations)
-- **Cumulative P&L:** `cumsum()` within each sector
+- **Cumulative P&L:** `cumsum()` within each sector and bizsector
 
 ### Sharpe Ratio Calculation
 - **Annualized Sharpe:** `mean_return / std_return * √252` (assuming risk-free rate = 0)
 - **Sector-level:** Calculated per sector using daily P&L returns
+- **Bizsector-level:** Calculated per bizsector using daily P&L returns
 - **Edge cases:** Handles single data point (Sharpe = 0) and zero standard deviation (Sharpe = 0)
-- **Comparison:** Sector Sharpe ratios compared across simulations in comparative analysis
+- **Comparison:** Sector and bizsector Sharpe ratios compared across simulations in comparative analysis
 
 ### Visualization Types
 1. **Weekly P&L Heatmap:** Sector performance over time (resampled weekly)
@@ -230,23 +254,27 @@ The merged dataset includes all position columns plus:
 3. **Total P&L by Sector:** Bar chart of aggregated performance
 4. **Daily Total P&L:** Timeline with positive/negative fill
 5. **Sector Exposure Over Time:** Log-scale line chart
+6. **Bizsector Visualizations:** Parallel set of visualizations for bizsector-level analysis (bizsector_plots directory)
 
 ### Report Insights
 - Top/bottom 10 symbols by P&L
 - Sector win rates (days with positive P&L)
 - **Sector Sharpe ratios** (annualized risk-adjusted performance)
+- Bizsector win rates and Sharpe ratios
 - Maximum drawdown analysis
 - Monthly performance breakdown
-- Latest exposure concentration
+- Latest exposure concentration (sector and bizsector)
 
 ### Comparison Metrics (Multi-Simulation)
 - **Total P&L Comparison:** Absolute and percentage differences between simulations
 - **Sector Performance Deltas:** Sector-by-sector performance differences
 - **Sector Sharpe Ratio Comparison:** Risk-adjusted performance comparison across sectors
+- **Bizsector Performance Deltas:** Bizsector-by-bizsector performance differences
+- **Bizsector Sharpe Ratio Comparison:** Risk-adjusted performance comparison across industry groups
 - **Risk Metrics Comparison:** Volatility, Sharpe ratio, max drawdown, win rates
 - **Correlation Analysis:** Daily return correlations between simulation pairs
 - **Statistical Significance:** Performance difference significance testing
-- **Visual Comparisons:** Side-by-side bar charts, overlay line charts, heatmaps, scatter plots, sector Sharpe ratio charts
+- **Visual Comparisons:** Side-by-side bar charts, overlay line charts, heatmaps, scatter plots, sector and bizsector Sharpe ratio charts
 
 ### Command-Line Interface
 All scripts support command-line arguments for flexible execution:

@@ -12,25 +12,39 @@ plt.style.use('seaborn-v0_8-darkgrid')
 sns.set_palette("husl")
 
 def load_simulation_data(simulation, output_base_dir='outputs'):
-    """Load analysis results for a single simulation"""
+    """Load analysis results for a single simulation including sector and bizsector data"""
     sim_dir = Path(output_base_dir) / simulation / 'pnl_results'
 
     if not sim_dir.exists():
         print(f"Warning: Results directory not found for simulation '{simulation}' at {sim_dir}")
-        return None, None, None
+        return None, None, None, None, None
 
     try:
         sector_daily_path = sim_dir / 'sector_daily_pnl.csv'
         sector_summary_path = sim_dir / 'sector_summary.csv'
         daily_total_path = sim_dir / 'daily_total_pnl.csv'
+        bizsector_daily_path = sim_dir / 'bizsector_daily_pnl.csv'
+        bizsector_summary_path = sim_dir / 'bizsector_summary.csv'
 
         if not sector_daily_path.exists():
             print(f"Warning: sector_daily_pnl.csv not found for '{simulation}'")
-            return None, None, None
+            return None, None, None, None, None
 
         sector_daily = pd.read_csv(sector_daily_path, parse_dates=['date'])
         sector_summary = pd.read_csv(sector_summary_path)
         daily_total = pd.read_csv(daily_total_path, parse_dates=['date'])
+
+        # Load bizsector data if available
+        bizsector_daily = None
+        bizsector_summary = None
+        if bizsector_daily_path.exists() and bizsector_summary_path.exists():
+            bizsector_daily = pd.read_csv(bizsector_daily_path, parse_dates=['date'])
+            bizsector_summary = pd.read_csv(bizsector_summary_path)
+            # Add simulation identifier
+            bizsector_daily['simulation'] = simulation
+            bizsector_summary['simulation'] = simulation
+        else:
+            print(f"  Note: Bizsector data not found for '{simulation}', skipping bizsector comparison")
 
         # Add simulation identifier
         sector_daily['simulation'] = simulation
@@ -41,12 +55,15 @@ def load_simulation_data(simulation, output_base_dir='outputs'):
         print(f"  - Sector daily: {sector_daily.shape} rows")
         print(f"  - Sector summary: {sector_summary.shape} rows")
         print(f"  - Daily total: {daily_total.shape} rows")
+        if bizsector_daily is not None:
+            print(f"  - Bizsector daily: {bizsector_daily.shape} rows")
+            print(f"  - Bizsector summary: {bizsector_summary.shape} rows")
 
-        return sector_daily, sector_summary, daily_total
+        return sector_daily, sector_summary, daily_total, bizsector_daily, bizsector_summary
 
     except Exception as e:
         print(f"Error loading data for '{simulation}': {e}")
-        return None, None, None
+        return None, None, None, None, None
 
 def align_dates_across_simulations(sector_daily_dict):
     """Align dates across simulations to ensure fair comparison"""
@@ -73,8 +90,9 @@ def align_dates_across_simulations(sector_daily_dict):
 
     return aligned_dict
 
-def calculate_comparison_metrics(sector_daily_dict, sector_summary_dict, daily_total_dict):
-    """Calculate comparative metrics across simulations"""
+def calculate_comparison_metrics(sector_daily_dict, sector_summary_dict, daily_total_dict,
+                                 bizsector_daily_dict=None, bizsector_summary_dict=None):
+    """Calculate comparative metrics across simulations including sector and bizsector levels"""
     comparison_metrics = {}
 
     # 1. Total P&L comparison
@@ -142,7 +160,47 @@ def calculate_comparison_metrics(sector_daily_dict, sector_summary_dict, daily_t
                     sector_data[sim] = 0
         sector_sharpe_comparison[sector] = sector_data
 
-    # 4. Risk metrics comparison
+    # 4. Bizsector performance comparison (if data available)
+    bizsector_comparison = {}
+    bizsector_sharpe_comparison = {}
+
+    if bizsector_summary_dict is not None and any(v is not None and not v.empty for v in bizsector_summary_dict.values()):
+        all_bizsectors = set()
+        # Collect all bizsectors across simulations
+        for sim, summary in bizsector_summary_dict.items():
+            if summary is not None and not summary.empty:
+                all_bizsectors.update(summary['bizsector'].unique())
+
+        # Compare bizsector performance
+        for bizsector in all_bizsectors:
+            bizsector_data = {}
+            for sim, summary in bizsector_summary_dict.items():
+                if summary is not None and not summary.empty:
+                    bizsector_row = summary[summary['bizsector'] == bizsector]
+                    if not bizsector_row.empty:
+                        bizsector_data[sim] = bizsector_row.iloc[0]['total_pnl']
+                    else:
+                        bizsector_data[sim] = 0
+            bizsector_comparison[bizsector] = bizsector_data
+
+        # Bizsector Sharpe ratio comparison
+        all_bizsectors = set()
+        for sim, summary in bizsector_summary_dict.items():
+            if summary is not None and not summary.empty:
+                all_bizsectors.update(summary['bizsector'].unique())
+
+        for bizsector in all_bizsectors:
+            bizsector_data = {}
+            for sim, summary in bizsector_summary_dict.items():
+                if summary is not None and not summary.empty:
+                    bizsector_row = summary[summary['bizsector'] == bizsector]
+                    if not bizsector_row.empty:
+                        bizsector_data[sim] = bizsector_row.iloc[0]['sharpe_ratio']
+                    else:
+                        bizsector_data[sim] = 0
+            bizsector_sharpe_comparison[bizsector] = bizsector_data
+
+    # 5. Risk metrics comparison
     risk_metrics = []
     for sim, daily in sector_daily_dict.items():
         if daily is not None and not daily.empty:
@@ -178,7 +236,7 @@ def calculate_comparison_metrics(sector_daily_dict, sector_summary_dict, daily_t
 
     risk_metrics_df = pd.DataFrame(risk_metrics)
 
-    # 5. Correlation analysis between daily returns
+    # 6. Correlation analysis between daily returns
     correlation_data = {}
     if len(sector_daily_dict) >= 2:
         # Get common dates first
@@ -210,6 +268,8 @@ def calculate_comparison_metrics(sector_daily_dict, sector_summary_dict, daily_t
         'total_pnl_comparison': total_pnl_df,
         'sector_comparison': sector_comparison,
         'sector_sharpe_comparison': sector_sharpe_comparison,
+        'bizsector_comparison': bizsector_comparison,
+        'bizsector_sharpe_comparison': bizsector_sharpe_comparison,
         'risk_metrics': risk_metrics_df,
         'correlations': correlation_data,
         'comparison_metrics': comparison_metrics
@@ -293,6 +353,58 @@ def generate_comparison_visualizations(comparison_results, simulations, sector_d
             plt.legend()
             plt.tight_layout()
             plt.savefig(output_dir / 'sector_sharpe_comparison.png', dpi=150, bbox_inches='tight')
+            plt.close()
+
+    # Bizsector Performance Side-by-Side Bar Chart
+    if 'bizsector_comparison' in comparison_results and comparison_results['bizsector_comparison']:
+        bizsector_comp = comparison_results['bizsector_comparison']
+        bizsectors = list(bizsector_comp.keys())
+
+        if bizsectors and len(simulations) >= 2:
+            # Prepare data for grouped bar chart
+            x = np.arange(len(bizsectors))
+            width = 0.8 / len(simulations)
+
+            plt.figure(figsize=(16, 10))
+
+            for i, sim in enumerate(simulations):
+                values = [bizsector_comp[bizsector].get(sim, 0) for bizsector in bizsectors]
+                plt.bar(x + i*width - width*(len(simulations)-1)/2, values,
+                       width=width, label=sim, alpha=0.8)
+
+            plt.title('Bizsector P&L Comparison Across Simulations', fontsize=14, fontweight='bold')
+            plt.xlabel('Bizsector')
+            plt.ylabel('Total P&L ($)')
+            plt.xticks(x, bizsectors, rotation=45, ha='right')
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(output_dir / 'bizsector_pnl_comparison.png', dpi=150, bbox_inches='tight')
+            plt.close()
+
+    # Bizsector Sharpe Ratio Comparison
+    if 'bizsector_sharpe_comparison' in comparison_results and comparison_results['bizsector_sharpe_comparison']:
+        bizsector_sharpe_comp = comparison_results['bizsector_sharpe_comparison']
+        bizsectors = list(bizsector_sharpe_comp.keys())
+
+        if bizsectors and len(simulations) >= 2:
+            # Prepare data for grouped bar chart
+            x = np.arange(len(bizsectors))
+            width = 0.8 / len(simulations)
+
+            plt.figure(figsize=(16, 10))
+
+            for i, sim in enumerate(simulations):
+                values = [bizsector_sharpe_comp[bizsector].get(sim, 0) for bizsector in bizsectors]
+                plt.bar(x + i*width - width*(len(simulations)-1)/2, values,
+                       width=width, label=sim, alpha=0.8)
+
+            plt.title('Bizsector Sharpe Ratio Comparison Across Simulations', fontsize=14, fontweight='bold')
+            plt.xlabel('Bizsector')
+            plt.ylabel('Sharpe Ratio (annualized)')
+            plt.xticks(x, bizsectors, rotation=45, ha='right')
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(output_dir / 'bizsector_sharpe_comparison.png', dpi=150, bbox_inches='tight')
             plt.close()
 
     # 4. Cumulative P&L Overlay Line Chart
@@ -433,6 +545,32 @@ def save_comparison_results(comparison_results, output_dir):
         with open(output_dir / 'sector_sharpe_comparison.json', 'w') as f:
             json.dump(serializable_sector_sharpe_comp, f, indent=2)
 
+    # Save bizsector comparison as JSON (since it's nested)
+    if 'bizsector_comparison' in comparison_results and comparison_results['bizsector_comparison']:
+        import json
+        bizsector_comp = comparison_results['bizsector_comparison']
+
+        # Convert to serializable format
+        serializable_bizsector_comp = {}
+        for bizsector, sim_data in bizsector_comp.items():
+            serializable_bizsector_comp[str(bizsector)] = {str(k): float(v) for k, v in sim_data.items()}
+
+        with open(output_dir / 'bizsector_comparison.json', 'w') as f:
+            json.dump(serializable_bizsector_comp, f, indent=2)
+
+    # Save bizsector Sharpe comparison as JSON (since it's nested)
+    if 'bizsector_sharpe_comparison' in comparison_results and comparison_results['bizsector_sharpe_comparison']:
+        import json
+        bizsector_sharpe_comp = comparison_results['bizsector_sharpe_comparison']
+
+        # Convert to serializable format
+        serializable_bizsector_sharpe_comp = {}
+        for bizsector, sim_data in bizsector_sharpe_comp.items():
+            serializable_bizsector_sharpe_comp[str(bizsector)] = {str(k): float(v) for k, v in sim_data.items()}
+
+        with open(output_dir / 'bizsector_sharpe_comparison.json', 'w') as f:
+            json.dump(serializable_bizsector_sharpe_comp, f, indent=2)
+
     # Save correlation data
     if 'correlations' in comparison_results and comparison_results['correlations']:
         pd.Series(comparison_results['correlations']).to_csv(output_dir / 'correlations.csv', header=['correlation'])
@@ -466,15 +604,21 @@ def main():
     sector_daily_dict = {}
     sector_summary_dict = {}
     daily_total_dict = {}
+    bizsector_daily_dict = {}
+    bizsector_summary_dict = {}
 
     for sim in args.simulations:
         print(f"Loading data for simulation '{sim}'...")
-        sector_daily, sector_summary, daily_total = load_simulation_data(sim, args.output_base_dir)
+        sector_daily, sector_summary, daily_total, bizsector_daily, bizsector_summary = load_simulation_data(sim, args.output_base_dir)
 
         if sector_daily is not None:
             sector_daily_dict[sim] = sector_daily
             sector_summary_dict[sim] = sector_summary
             daily_total_dict[sim] = daily_total
+            # Store bizsector data if available (may be None)
+            if bizsector_daily is not None:
+                bizsector_daily_dict[sim] = bizsector_daily
+                bizsector_summary_dict[sim] = bizsector_summary
         else:
             print(f"  Warning: Could not load data for '{sim}', skipping")
 
@@ -487,7 +631,10 @@ def main():
 
     # Calculate comparison metrics
     print("\nCalculating comparison metrics...")
-    comparison_results = calculate_comparison_metrics(sector_daily_dict, sector_summary_dict, daily_total_dict)
+    comparison_results = calculate_comparison_metrics(
+        sector_daily_dict, sector_summary_dict, daily_total_dict,
+        bizsector_daily_dict, bizsector_summary_dict
+    )
 
     # Generate visualizations
     comparison_output_dir = Path(args.output_base_dir) / args.comparison_dir

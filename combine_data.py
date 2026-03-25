@@ -113,6 +113,7 @@ def load_industry_data(industry_path='pos'):
 
     # Create sector code from first 2 digits of industry code
     industry_df['sector_code'] = industry_df['newIndustry'].astype(str).str[:2]
+    industry_df['bizsector_code'] = industry_df['newIndustry'].astype(str).str[:4]
 
     # Map common sector codes based on user info (50 = energy)
     sector_map = {
@@ -129,8 +130,40 @@ def load_industry_data(industry_path='pos'):
         '60': 'Real Estate'
     }
 
+    # Map common bizsector codes (first 4 digits of industry code)
+    bizsector_map = {
+        '5310': 'Automobiles & Components',
+        '5320': 'Consumer Durables & Apparel',
+        '5330': 'Consumer Services',
+        '5340': 'Retailing',
+        '5410': 'Food, Beverage & Tobacco',
+        '5420': 'Household & Personal Products',
+        '5430': 'Food & Staples Retailing',
+        '5440': 'Industrial Conglomerates',
+        '5010': 'Oil, Gas & Consumable Fuels',
+        '5020': 'Renewable Energy',
+        '5510': 'Financial Services',
+        '5530': 'Insurance',
+        '5550': 'Private Equity',
+        '5610': 'Health Care Equipment & Services',
+        '5620': 'Pharmaceuticals & Biotechnology',
+        '5210': 'Capital Goods',
+        '5220': 'Commercial & Professional Services',
+        '5240': 'Transportation',
+        '5710': 'Technology Hardware & Equipment',
+        '5720': 'Software & Services',
+        '5730': 'Financial Technology',
+        '5740': 'Telecommunications',
+        '5110': 'Chemicals',
+        '5120': 'Construction Materials',
+        '5130': 'Containers & Packaging',
+        '6010': 'Real Estate Investment Trusts (REITs)',
+        '5910': 'Electric Utilities'
+    }
+
     industry_df['sector'] = industry_df['sector_code'].map(sector_map)
     industry_df['sector'] = industry_df['sector'].fillna('Other')
+    industry_df['bizsector'] = industry_df['bizsector_code'].map(bizsector_map).fillna('Other')
 
     return industry_df
 
@@ -203,6 +236,7 @@ def main():
         print(f"Date range: {merged_df['date'].min()} to {merged_df['date'].max()}")
         print(f"Unique symbols: {merged_df['RSymbol'].nunique()}")
         print(f"Unique sectors: {merged_df['sector'].nunique()}")
+        print(f"Unique bizsectors: {merged_df['bizsector'].nunique()}")
 
         # Show sector distribution
         if 'sector' in merged_df.columns:
@@ -210,6 +244,13 @@ def main():
             print("\nSector distribution:")
             for sector, count in sector_counts.items():
                 print(f"  {sector}: {count} rows")
+
+        # Show bizsector distribution
+        if 'bizsector' in merged_df.columns:
+            bizsector_counts = merged_df['bizsector'].value_counts()
+            print("\nBizsector distribution:")
+            for bizsector, count in bizsector_counts.items():
+                print(f"  {bizsector}: {count} rows")
 
     return merged_df
 

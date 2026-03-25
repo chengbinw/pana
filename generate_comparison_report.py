@@ -59,6 +59,38 @@ def load_comparison_data(comparison_dir='outputs/comparison'):
         print(f"Warning: sector_sharpe_comparison.json not found at {sector_sharpe_path}")
         data['sector_sharpe_comparison'] = None
 
+    # Load bizsector comparison (JSON)
+    bizsector_comp_path = comparison_dir / 'bizsector_comparison.json'
+    if bizsector_comp_path.exists():
+        with open(bizsector_comp_path, 'r') as f:
+            bizsector_data = json.load(f)
+        # Convert to DataFrame for easier manipulation
+        bizsector_rows = []
+        for bizsector, sim_values in bizsector_data.items():
+            row = {'bizsector': bizsector}
+            row.update(sim_values)
+            bizsector_rows.append(row)
+        data['bizsector_comparison'] = pd.DataFrame(bizsector_rows)
+    else:
+        print(f"Warning: bizsector_comparison.json not found at {bizsector_comp_path}")
+        data['bizsector_comparison'] = None
+
+    # Load bizsector Sharpe comparison (JSON)
+    bizsector_sharpe_path = comparison_dir / 'bizsector_sharpe_comparison.json'
+    if bizsector_sharpe_path.exists():
+        with open(bizsector_sharpe_path, 'r') as f:
+            bizsector_sharpe_data = json.load(f)
+        # Convert to DataFrame for easier manipulation
+        bizsector_sharpe_rows = []
+        for bizsector, sim_values in bizsector_sharpe_data.items():
+            row = {'bizsector': bizsector}
+            row.update(sim_values)
+            bizsector_sharpe_rows.append(row)
+        data['bizsector_sharpe_comparison'] = pd.DataFrame(bizsector_sharpe_rows)
+    else:
+        print(f"Warning: bizsector_sharpe_comparison.json not found at {bizsector_sharpe_path}")
+        data['bizsector_sharpe_comparison'] = None
+
     # Load correlations
     correlations_path = comparison_dir / 'correlations.csv'
     if correlations_path.exists():
@@ -208,6 +240,73 @@ def generate_comparison_insights(data):
                 'bottom_5': best_overall[-5:] if len(best_overall) >= 5 else best_overall
             }
 
+    # Bizsector comparison insights
+    if data['bizsector_comparison'] is not None and not data['bizsector_comparison'].empty:
+        bizsector_df = data['bizsector_comparison']
+        # Identify simulation columns (exclude 'bizsector' column)
+        sim_cols = [col for col in bizsector_df.columns if col != 'bizsector']
+
+        if len(sim_cols) >= 2:
+            insights['bizsector'] = {}
+            # Find bizsectors with largest differences
+            for bizsector in bizsector_df['bizsector']:
+                row = bizsector_df[bizsector_df['bizsector'] == bizsector].iloc[0]
+                values = [row[col] for col in sim_cols]
+                max_val = max(values)
+                min_val = min(values)
+                max_sim = sim_cols[values.index(max_val)]
+                min_sim = sim_cols[values.index(min_val)]
+                diff = max_val - min_val
+
+                if diff != 0:  # Only record meaningful differences
+                    insights['bizsector'][bizsector] = {
+                        'largest_difference': diff,
+                        'best_simulation': max_sim,
+                        'best_value': max_val,
+                        'worst_simulation': min_sim,
+                        'worst_value': min_val
+                    }
+
+    # Bizsector Sharpe ratio insights
+    if data['bizsector_sharpe_comparison'] is not None and not data['bizsector_sharpe_comparison'].empty:
+        sharpe_df = data['bizsector_sharpe_comparison']
+        # Identify simulation columns (exclude 'bizsector' column)
+        sim_cols = [col for col in sharpe_df.columns if col != 'bizsector']
+
+        if len(sim_cols) >= 1:
+            insights['bizsector_sharpe'] = {}
+            # Find best and worst Sharpe ratios per bizsector
+            for bizsector in sharpe_df['bizsector']:
+                row = sharpe_df[sharpe_df['bizsector'] == bizsector].iloc[0]
+                values = [row[col] for col in sim_cols]
+                max_val = max(values)
+                min_val = min(values)
+                max_sim = sim_cols[values.index(max_val)]
+                min_sim = sim_cols[values.index(min_val)]
+                diff = max_val - min_val
+
+                insights['bizsector_sharpe'][bizsector] = {
+                    'largest_difference': diff,
+                    'best_simulation': max_sim,
+                    'best_value': max_val,
+                    'worst_simulation': min_sim,
+                    'worst_value': min_val
+                }
+
+            # Overall best Sharpe ratios across all bizsectors
+            best_overall_biz = []
+            for bizsector in sharpe_df['bizsector']:
+                row = sharpe_df[sharpe_df['bizsector'] == bizsector].iloc[0]
+                for sim in sim_cols:
+                    best_overall_biz.append((bizsector, sim, row[sim]))
+
+            # Sort by Sharpe ratio descending
+            best_overall_biz.sort(key=lambda x: x[2], reverse=True)
+            insights['bizsector_sharpe_overall'] = {
+                'top_5': best_overall_biz[:5],
+                'bottom_5': best_overall_biz[-5:] if len(best_overall_biz) >= 5 else best_overall_biz
+            }
+
     return insights
 
 def generate_markdown_report(data, insights, output_dir='outputs/comparison'):
@@ -338,6 +437,91 @@ def generate_markdown_report(data, insights, output_dir='outputs/comparison'):
                     report.append(f"{i}. **{sector}** ({sim}): {value:.3f}")
                 report.append("")
 
+    # Bizsector Performance Comparison
+    if data['bizsector_comparison'] is not None and not data['bizsector_comparison'].empty:
+        report.append("## Bizsector Performance Comparison")
+        report.append("")
+        report.append("Bizsector analysis provides more granular insights at the 4-digit industry group level.")
+        report.append("")
+
+        bizsector_df = data['bizsector_comparison']
+        sim_cols = [col for col in bizsector_df.columns if col != 'bizsector']
+
+        # Create table header
+        header = "| Bizsector | " + " | ".join(sim_cols) + " |"
+        report.append(header)
+        separator = "|-----------|" + "|".join(["---" for _ in sim_cols]) + "|"
+        report.append(separator)
+
+        # Add rows
+        for _, row in bizsector_df.iterrows():
+            values = " | ".join([f"${row[col]:,.2f}" for col in sim_cols])
+            report.append(f"| {row['bizsector']} | {values} |")
+        report.append("")
+
+        # Highlight key differences
+        if 'bizsector' in insights and insights['bizsector']:
+            report.append("### Key Bizsector Differences")
+            report.append("")
+
+            # Sort bizsectors by difference magnitude
+            bizsector_diffs = []
+            for bizsector, info in insights['bizsector'].items():
+                bizsector_diffs.append((bizsector, info['largest_difference']))
+            bizsector_diffs.sort(key=lambda x: abs(x[1]), reverse=True)
+
+            for bizsector, diff in bizsector_diffs[:5]:  # Top 5 differences
+                info = insights['bizsector'][bizsector]
+                report.append(f"- **{bizsector}**: {info['best_simulation']} outperformed {info['worst_simulation']} by ${info['largest_difference']:,.2f}")
+            report.append("")
+
+    # Bizsector Sharpe Ratio Comparison
+    if data['bizsector_sharpe_comparison'] is not None and not data['bizsector_sharpe_comparison'].empty:
+        report.append("## Bizsector Sharpe Ratio Comparison")
+        report.append("")
+        report.append("Bizsector Sharpe ratios measure risk-adjusted performance at the industry group level.")
+        report.append("")
+
+        sharpe_df = data['bizsector_sharpe_comparison']
+        sim_cols = [col for col in sharpe_df.columns if col != 'bizsector']
+
+        # Create table header
+        header = "| Bizsector | " + " | ".join(sim_cols) + " |"
+        report.append(header)
+        separator = "|-----------|" + "|".join(["---" for _ in sim_cols]) + "|"
+        report.append(separator)
+
+        # Add rows
+        for _, row in sharpe_df.iterrows():
+            values = " | ".join([f"{row[col]:.3f}" for col in sim_cols])
+            report.append(f"| {row['bizsector']} | {values} |")
+        report.append("")
+
+        # Highlight key insights
+        if 'bizsector_sharpe' in insights and insights['bizsector_sharpe']:
+            report.append("### Key Bizsector Sharpe Ratio Insights")
+            report.append("")
+
+            # Find bizsectors with largest Sharpe ratio differences
+            sharpe_diffs = []
+            for bizsector, info in insights['bizsector_sharpe'].items():
+                sharpe_diffs.append((bizsector, info['largest_difference']))
+            sharpe_diffs.sort(key=lambda x: abs(x[1]), reverse=True)
+
+            for bizsector, diff in sharpe_diffs[:3]:  # Top 3 differences
+                info = insights['bizsector_sharpe'][bizsector]
+                report.append(f"- **{bizsector}**: {info['best_simulation']} has best Sharpe ratio ({info['best_value']:.3f}) vs {info['worst_simulation']} ({info['worst_value']:.3f})")
+            report.append("")
+
+            # Top 5 overall bizsector Sharpe ratios
+            if 'bizsector_sharpe_overall' in insights:
+                overall = insights['bizsector_sharpe_overall']
+                report.append("### Top 5 Bizsector Risk-Adjusted Performances")
+                report.append("")
+                for i, (bizsector, sim, value) in enumerate(overall['top_5'], 1):
+                    report.append(f"{i}. **{bizsector}** ({sim}): {value:.3f}")
+                report.append("")
+
     # Correlation Analysis
     if data['correlations'] is not None and not data['correlations'].empty:
         report.append("## Correlation Analysis")
@@ -410,6 +594,20 @@ def generate_markdown_report(data, insights, output_dir='outputs/comparison'):
             max_sharpe_info = insights['sector_sharpe'][max_sharpe_diff_sector]
             report.append(f"6. **Risk-Adjusted Sector Performance**: {max_sharpe_info['best_simulation']} achieved the best Sharpe ratio in {max_sharpe_diff_sector} sector ({max_sharpe_info['best_value']:.3f}), indicating superior risk-adjusted returns in that sector.")
 
+    if 'bizsector' in insights and insights['bizsector']:
+        # Find bizsector with largest absolute difference
+        max_diff_bizsector = max(insights['bizsector'].items(), key=lambda x: abs(x[1]['largest_difference']))[0]
+        max_diff_info = insights['bizsector'][max_diff_bizsector]
+        report.append(f"7. **Bizsector Divergence**: The largest performance difference occurred in {max_diff_bizsector} bizsector, where {max_diff_info['best_simulation']} outperformed {max_diff_info['worst_simulation']} by ${max_diff_info['largest_difference']:,.2f}.")
+
+    if 'bizsector_sharpe' in insights and insights['bizsector_sharpe']:
+        # Find bizsector with largest Sharpe ratio difference
+        sharpe_diffs = [(bizsector, info['largest_difference']) for bizsector, info in insights['bizsector_sharpe'].items()]
+        if sharpe_diffs:
+            max_sharpe_diff_bizsector = max(sharpe_diffs, key=lambda x: abs(x[1]))[0]
+            max_sharpe_info = insights['bizsector_sharpe'][max_sharpe_diff_bizsector]
+            report.append(f"8. **Risk-Adjusted Bizsector Performance**: {max_sharpe_info['best_simulation']} achieved the best Sharpe ratio in {max_sharpe_diff_bizsector} bizsector ({max_sharpe_info['best_value']:.3f}), indicating superior risk-adjusted returns at the industry group level.")
+
     if 'correlations' in insights:
         corr = insights['correlations']
         report.append(f"7. **Return Correlation**: Simulation pairs show an average correlation of {corr['average']:.3f}, indicating {'similar' if corr['average'] > 0.5 else 'divergent'} return patterns.")
@@ -436,6 +634,13 @@ def generate_markdown_report(data, insights, output_dir='outputs/comparison'):
 
     if 'sector_sharpe' in insights and insights['sector_sharpe']:
         report.append(f"6. **Risk-Adjusted Sector Focus**: Review sector Sharpe ratios to identify which simulations deliver superior risk-adjusted returns in specific sectors for targeted strategy improvements.")
+
+    if 'bizsector' in insights and insights['bizsector']:
+        report.append(f"7. **Granular Bizsector Analysis**: Investigate bizsector-level differences to understand performance drivers at the industry group level.")
+        report.append(f"8. **Industry Group Optimization**: Consider blending strategies based on bizsector strengths for more precise portfolio construction.")
+
+    if 'bizsector_sharpe' in insights and insights['bizsector_sharpe']:
+        report.append(f"9. **Risk-Adjusted Bizsector Focus**: Review bizsector Sharpe ratios to identify which simulations deliver superior risk-adjusted returns in specific industry groups for targeted strategy improvements.")
 
     report.append("")
 
@@ -522,7 +727,7 @@ def main():
     data = load_comparison_data(args.comparison_dir)
 
     # Check if we have any data
-    if all(v is None or (isinstance(v, list) and len(v) == 0) for v in data.values()):
+    if all(v is None or (isinstance(v, list) and len(v) == 0) or (isinstance(v, pd.DataFrame) and v.empty) for v in data.values()):
         print(f"ERROR: No comparison data found in {args.comparison_dir}")
         print("Please run compare_simulations.py first to generate comparison results")
         return
