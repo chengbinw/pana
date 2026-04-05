@@ -52,11 +52,15 @@ run_analysis.bat TWOFISH                     # Windows CMD
 # Analyze two simulations and compare
 ./run_analysis_auto.sh bye byd --compare
 
+# Analyze three simulations and compare  
+./run_analysis_auto.sh bye byd byeorig --compare
+
 # Analyze with simulation subdirectories
 ./run_analysis_auto.sh bye byd --pos-dir-base . --compare
 
 # Run comparison on existing results
 python compare_simulations.py bye byd --output-base-dir outputs
+# Compare three simulations: python compare_simulations.py bye byd byeorig --output-base-dir outputs
 python generate_comparison_report.py --comparison-dir outputs/comparison
 
 # Check sector Sharpe ratio comparison
@@ -64,6 +68,30 @@ python -c "
 import json;
 with open('outputs/comparison/sector_sharpe_comparison.json') as f:
     data = json.load(f);
+for sector, sims in data.items():
+    print(f'{sector:30} {str(sims)}')
+"
+```
+
+### Yearly Comparison Reports
+**Generate comparison reports for specific years:** Year appears in visualization titles for yearly comparison reports.
+```bash
+# Compare simulations for a specific year
+python compare_simulations.py bye byeorig --year 2022
+python generate_comparison_report.py --comparison-dir outputs/comparison_2022 --output-dir outputs/comparison_2022
+
+# Generate separate comparison reports for all years
+python compare_simulations.py bye byeorig --all-years
+for year in 2022 2023 2024 2025 2026; do
+    python generate_comparison_report.py --comparison-dir outputs/comparison_$year --output-dir outputs/comparison_$year
+done
+
+# Check yearly sector Sharpe ratio comparison for 2022
+python -c "
+import json;
+with open('outputs/comparison_2022/sector_sharpe_comparison.json') as f:
+    data = json.load(f);
+print('Year 2022 Sector Sharpe Ratios:')
 for sector, sims in data.items():
     print(f'{sector:30} {str(sims)}')
 "
@@ -120,11 +148,12 @@ print(df[['sector', 'total_pnl', 'sharpe_ratio']].sort_values('sharpe_ratio', as
 
 4. **Simulation Comparison** (`compare_simulations.py`):
    - Loads results from multiple simulation directories
+   - **Supports yearly filtering** (`--year`, `--all-years`) for period-specific comparisons
    - Calculates comparative metrics: total P&L difference, sector performance deltas
    - Computes risk metrics (volatility, Sharpe ratio, max drawdown)
    - Analyzes correlation between simulation returns
-   - Generates comparative visualizations in `outputs/comparison/comparison_plots/`
-   - Saves comparison data to `outputs/comparison/`
+   - Generates comparative visualizations in `outputs/comparison/comparison_plots/` (or `comparison_{YEAR}/`)
+   - Saves comparison data to `outputs/comparison/` (or `outputs/comparison_{YEAR}/`)
 
 5. **Comparison Reporting** (`generate_comparison_report.py`):
    - Loads comparison results including sector Sharpe ratio comparisons
@@ -295,17 +324,63 @@ All scripts support command-line arguments for flexible execution:
 - `--output-dir, -o`: Base output directory (default: outputs)
 
 **`compare_simulations.py`:**
-- Positional arguments: Simulation names (e.g., `bye byd`)
+- Positional arguments: Simulation names, space-separated or comma-separated (e.g., `bye byd` or `bye,byd`)
 - `--output-base-dir`: Base output directory (default: outputs)
 - `--comparison-dir`: Comparison output directory (default: outputs/comparison)
+- `--year, -y`: Filter data to specific year (e.g., 2022). If not provided, uses all years
+- `--all-years`: Generate separate comparison reports for each year present in data
 
 **`generate_comparison_report.py`:**
 - `--comparison-dir, -c`: Directory containing comparison results (default: outputs/comparison)
 - `--output-dir, -o`: Directory to save reports (default: outputs/comparison)
 
 **Runner Scripts:**
+- `SIMULATION...`: One or more simulation names, comma-separated or space-separated (default: TWOFISH)
 - `--compare`: Run comparison after analyzing all simulations
+- `--year YEAR`: Filter comparison to specific year (e.g., 2022) (requires `--compare`)
+- `--all-years`: Generate separate comparison reports for each year (requires `--compare`)
 - `--pos-dir-base`: Base directory with simulation subdirectories
 - `--pos-dir`: Directory containing position files
 - `--output-dir`: Base output directory
+
+## Case Study: Three‑Simulation Comparative Analysis
+
+A comprehensive analysis of three simulations (`byd`, `byeorig`, `bye`) demonstrates the pipeline's capability to evaluate different trading strategies.
+
+### Performance Rankings (All Years Combined)
+
+| Metric | 1st | 2nd | 3rd |
+|--------|-----|-----|-----|
+| **Total P&L** | byeorig ($13.34M) | bye ($12.87M) | byd ($9.91M) |
+| **Sharpe Ratio** | bye (0.124) | byeorig (0.116) | byd (0.088) |
+| **Volatility** | bye (97,395) | byd (105,432) | byeorig (107,567) |
+| **Win Rate** | bye (54.22%) | byd (53.66%) | byeorig (53.28%) |
+| **Max Drawdown** | byd ($2.20M) | bye ($2.30M) | byeorig ($2.43M) |
+
+### Strategy Type Inference
+
+| Simulation | Likely Strategy | Characteristics |
+|------------|----------------|-----------------|
+| **bye** | Balanced Risk‑Managed | Highest Sharpe, lowest volatility, best consistency |
+| **byeorig** | High‑Return Aggressive | Maximum absolute returns, higher volatility |
+| **byd** | Conservative Capital‑Preservation | Best drawdown control, utility‑focused |
+
+### Year‑by‑Year Patterns
+- **2022**: `byeorig` dominance (aggressive strategy worked)
+- **2023‑2024**: `byd` outperforms (conservative strategy excels)  
+- **2025‑2026**: `bye` leads (balanced strategy adapts best)
+
+### Recommendations
+- **For risk‑adjusted returns**: `bye` (highest Sharpe ratio, lowest volatility)
+- **For absolute returns**: `byeorig` (highest total P&L)
+- **For capital preservation**: `byd` (smallest maximum drawdown)
+- **Overall balanced choice**: `bye` (best composite score across metrics)
+
+### Sector‑Level Insights
+- All simulations excel in **Utilities** and **Information Technology**
+- `bye` leads in 5 sectors (broadest strength)
+- `byd` strongest in Utilities (1.026 Sharpe)
+- `byeorig` strongest in Information Technology (1.247 Sharpe)
+
+This analysis demonstrates how the pipeline can identify strategy characteristics, assess performance across different market regimes, and provide actionable recommendations for strategy selection.
 

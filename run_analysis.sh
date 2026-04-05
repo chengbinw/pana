@@ -6,7 +6,9 @@
 #   ./run_analysis.sh                         # Run default simulation (TWOFISH)
 #   ./run_analysis.sh TWOFISH                 # Run specific simulation
 #   ./run_analysis.sh TWOFISH BLOWFISH        # Run multiple simulations
+#   ./run_analysis.sh TWOFISH BLOWFISH BYE    # Run multiple simulations (3+)
 #   ./run_analysis.sh TWOFISH BLOWFISH --compare  # Run multiple and compare
+#   ./run_analysis.sh TWOFISH BLOWFISH BYE --compare  # Run multiple and compare (3+)
 #   ./run_analysis.sh --help                  # Show help
 
 set -e  # Exit on any error
@@ -14,6 +16,8 @@ set -e  # Exit on any error
 # Default values
 SIMULATIONS=("TWOFISH")
 COMPARE_MODE=false
+YEAR=""
+ALL_YEARS=false
 POS_DIR="pos"
 POS_DIR_BASE=""
 OUTPUT_BASE_DIR="outputs"
@@ -23,20 +27,30 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --help|-h)
             echo "Financial Position Analysis Pipeline"
-            echo "Usage: $0 [SIMULATION...] [--compare] [--pos-dir DIR] [--pos-dir-base DIR] [--output-dir DIR]"
+            echo "Usage: $0 [SIMULATION...] [--compare] [--year YEAR] [--all-years] [--pos-dir DIR] [--pos-dir-base DIR] [--output-dir DIR]"
             echo ""
             echo "Arguments:"
-            echo "  SIMULATION...    One or more simulation names (default: TWOFISH)"
+            echo "  SIMULATION...    One or more simulation names, comma-separated or space-separated (default: TWOFISH)"
             echo "  --compare        Run comparison after analyzing all simulations"
+            echo "  --year YEAR      Filter comparison to specific year (e.g., 2022)"
+            echo "  --all-years      Generate separate comparison reports for each year"
             echo "  --pos-dir DIR    Directory containing position files (default: pos)"
             echo "  --pos-dir-base DIR Base directory with simulation subdirectories"
-            echo "                   (if set, uses DIR/SIMULATION for each simulation)"
+            echo "                   (if set, uses DIR/SIMULATION/pos for each simulation)"
             echo "  --output-dir DIR Base output directory (default: outputs)"
             echo "  --help, -h       Show this help message"
             exit 0
             ;;
         --compare)
             COMPARE_MODE=true
+            shift
+            ;;
+        --year)
+            YEAR="$2"
+            shift 2
+            ;;
+        --all-years)
+            ALL_YEARS=true
             shift
             ;;
         --pos-dir)
@@ -57,8 +71,15 @@ while [[ $# -gt 0 ]]; do
             exit 1
             ;;
         *)
-            # Assume it's a simulation name
-            SIMULATIONS+=("$1")
+            # Assume it's a simulation name - support comma-separated list
+            IFS=',' read -ra sim_parts <<< "$1"
+            for sim_part in "${sim_parts[@]}"; do
+                # Trim whitespace
+                sim_clean=$(echo "$sim_part" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                if [ -n "$sim_clean" ]; then
+                    SIMULATIONS+=("$sim_clean")
+                fi
+            done
             shift
             ;;
     esac
@@ -83,6 +104,12 @@ else
 fi
 echo "  Output directory: $OUTPUT_BASE_DIR"
 echo "  Compare mode: $COMPARE_MODE"
+if [ -n "$YEAR" ]; then
+    echo "  Year filter: $YEAR"
+fi
+if [ "$ALL_YEARS" = true ]; then
+    echo "  All years: true (separate reports per year)"
+fi
 echo ""
 
 # Check if Python is available
@@ -251,19 +278,81 @@ if [ "$COMPARE_MODE" = true ]; then
     else
         echo "Comparing simulations: ${SUCCESSFUL_SIMS[*]}"
 
-        # Run comparison
-        python compare_simulations.py "${SUCCESSFUL_SIMS[@]}" --output-base-dir "$OUTPUT_BASE_DIR"
-        if [ $? -ne 0 ]; then
-            echo "ERROR: compare_simulations.py failed"
-        else
-            # Generate comparison report
-            python generate_comparison_report.py --comparison-dir "$OUTPUT_BASE_DIR/comparison" --output-dir "$OUTPUT_BASE_DIR/comparison"
-            if [ $? -ne 0 ]; then
-                echo "ERROR: generate_comparison_report.py failed"
+        # Function to run comparison for a specific year
+        run_comparison_for_year() {
+            local year="$1"
+            local year_suffix="$2"
+            local comparison_dir="$OUTPUT_BASE_DIR/comparison$year_suffix"
+
+            echo "  Year: $year"
+            echo "  Comparison directory: $comparison_dir"
+
+            # Run comparison
+            if [ -n "$year" ] && [ "$year" != "all" ]; then
+                python compare_simulations.py "${SUCCESSFUL_SIMS[@]}" --output-base-dir "$OUTPUT_BASE_DIR" --year "$year"
             else
-                echo "✓ Comparison completed"
-                echo "  Comparison directory: $OUTPUT_BASE_DIR/comparison"
-                echo "  Report: $OUTPUT_BASE_DIR/comparison/comparison_report.{md,html}"
+                python compare_simulations.py "${SUCCESSFUL_SIMS[@]}" --output-base-dir "$OUTPUT_BASE_DIR"
+            fi
+
+            if [ $? -ne 0 ]; then
+                echo "  ERROR: compare_simulations.py failed for year $year"
+                return 1
+            fi
+
+            # Generate comparison report
+            python generate_comparison_report.py --comparison-dir "$comparison_dir" --output-dir "$comparison_dir"
+            if [ $? -ne 0 ]; then
+                echo "  ERROR: generate_comparison_report.py failed for year $year"
+                return 1
+            fi
+
+            echo "  ✓ Comparison completed for year $year"
+            echo "    Report: $comparison_dir/comparison_report.{md,html}"
+            return 0
+        }
+
+        # Determine which years to compare
+        if [ "$ALL_YEARS" = true ]; then
+            echo "Running separate comparisons for each year..."
+            # Get years from data (we'll run compare_simulations.py with --all-years)
+            # compare_simulations.py --all-years will handle year detection and separate comparisons
+            python compare_simulations.py "${SUCCESSFUL_SIMS[@]}" --output-base-dir "$OUTPUT_BASE_DIR" --all-years
+            if [ $? -ne 0 ]; then
+                echo "ERROR: compare_simulations.py failed for all-years mode"
+            else
+                echo "✓ All-years comparison completed"
+                # Generate reports for each year
+                # Note: compare_simulations.py with --all-years creates directories but doesn't generate reports
+                # We need to generate reports for each year directory
+                # Enable nullglob to handle case where no comparison_* directories exist
+                shopt -s nullglob
+                year_dirs=("$OUTPUT_BASE_DIR"/comparison_*)
+                shopt -u nullglob
+
+                if [ ${#year_dirs[@]} -eq 0 ]; then
+                    echo "  Warning: No year comparison directories found"
+                else
+                    for year_dir in "${year_dirs[@]}"; do
+                        # Extract year from directory name (comparison_2022 -> 2022)
+                        year=$(basename "$year_dir" | sed 's/comparison_//')
+                        echo "  Generating report for year $year..."
+                        python generate_comparison_report.py --comparison-dir "$year_dir" --output-dir "$year_dir"
+                        if [ $? -ne 0 ]; then
+                            echo "    ERROR: generate_comparison_report.py failed for year $year"
+                        else
+                            echo "    ✓ Report generated for year $year"
+                        fi
+                    done
+                fi
+            fi
+        else
+            # Single year comparison (either specific year or all years combined)
+            if [ -n "$YEAR" ]; then
+                # Specific year
+                run_comparison_for_year "$YEAR" "_$YEAR"
+            else
+                # All years combined (default)
+                run_comparison_for_year "all" ""
             fi
         fi
     fi
@@ -295,10 +384,51 @@ for sim in "${SIMULATIONS[@]}"; do
     fi
 done
 if [ "$COMPARE_MODE" = true ] && [ ${#SUCCESSFUL_SIMS[@]} -ge 2 ]; then
-    echo "    └── comparison/"
-    echo "        ├── comparison_plots/"
-    echo "        ├── comparison_data/"
-    echo "        └── comparison_report.{md,html}"
+    # Determine which comparison directories were created
+    if [ "$ALL_YEARS" = true ]; then
+        # Show each year directory that exists (pattern comparison_*)
+        # Enable nullglob to handle case where no comparison_* directories exist
+        shopt -s nullglob
+        year_dirs=("$OUTPUT_BASE_DIR"/comparison_*)
+        shopt -u nullglob
+
+        years_shown=false
+        for year_dir in "${year_dirs[@]}"; do
+            # Extract year from directory name
+            year=$(basename "$year_dir" | sed 's/comparison_//')
+            if [ "$years_shown" = false ]; then
+                echo "    └── comparison_$year/"
+                echo "        ├── comparison_plots/"
+                echo "        ├── comparison_data/"
+                echo "        └── comparison_report.{md,html}"
+                years_shown=true
+            else
+                echo "    ├── comparison_$year/"
+                echo "    │   ├── comparison_plots/"
+                echo "    │   ├── comparison_data/"
+                echo "    │   └── comparison_report.{md,html}"
+            fi
+        done
+        # If no year directories exist (shouldn't happen), show default
+        if [ "$years_shown" = false ]; then
+            echo "    └── comparison/"
+            echo "        ├── comparison_plots/"
+            echo "        ├── comparison_data/"
+            echo "        └── comparison_report.{md,html}"
+        fi
+    elif [ -n "$YEAR" ]; then
+        # Specific year comparison
+        echo "    └── comparison_$YEAR/"
+        echo "        ├── comparison_plots/"
+        echo "        ├── comparison_data/"
+        echo "        └── comparison_report.{md,html}"
+    else
+        # Default comparison (all years combined)
+        echo "    └── comparison/"
+        echo "        ├── comparison_plots/"
+        echo "        ├── comparison_data/"
+        echo "        └── comparison_report.{md,html}"
+    fi
 fi
 
 echo ""

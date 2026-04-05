@@ -18,6 +18,7 @@ This project processes End-of-Day (EOD) position CSV files, merges them with ind
 - **Comparative Analysis**: Compares performance across multiple simulations with side-by-side metrics at both sector and bizsector levels
 - **Comparative Visualizations**: Generates comparison charts, heatmaps, and correlation plots
 - **Comprehensive Reporting**: Produces comparative analysis reports with insights and recommendations
+- **Yearly Comparison Reports**: Generate separate comparison reports for specific years (2022, 2023, etc.) or all years combined
 
 ## Quick Start
 
@@ -48,16 +49,34 @@ This project processes End-of-Day (EOD) position CSV files, merges them with ind
    ```
 
 3. **Run multiple simulations with comparison**:
+   Simulation names can be space-separated or comma-separated (e.g., `bye,byd` or `bye byd`).
    ```bash
    # Analyze two simulations and compare results
    ./run_analysis_auto.sh bye byd --compare
 
+   # Analyze three simulations and compare results  
+   ./run_analysis_auto.sh bye byd byeorig --compare
+
    # With simulation subdirectories (e.g., bye/pos/, byd/pos/)
-   ./run_analysis_auto.sh bye byd --pos-dir-base . --compare
+   ./run_analysis_auto.sh bye byd --pos-dir-base . --compare --all-years
 
    # Or run comparison on existing results
    python compare_simulations.py bye byd --output-base-dir outputs
+   # Compare three simulations: python compare_simulations.py bye byd byeorig --output-base-dir outputs
    python generate_comparison_report.py --comparison-dir outputs/comparison
+   ```
+
+4. **Generate yearly comparison reports**:
+   ```bash
+   # Compare simulations for a specific year
+   python compare_simulations.py bye byeorig --year 2022
+   python generate_comparison_report.py --comparison-dir outputs/comparison_2022 --output-dir outputs/comparison_2022
+
+   # Generate separate comparison reports for all years
+   python compare_simulations.py bye byeorig --all-years
+   for year in 2022 2023 2024 2025 2026; do
+       python generate_comparison_report.py --comparison-dir outputs/comparison_$year --output-dir outputs/comparison_$year
+   done
    ```
 
 ## Project Structure
@@ -87,7 +106,7 @@ Three runner scripts are provided for convenience, all supporting multi-simulati
    - Checks for dependencies and Python version
    - Prompts before overwriting existing files
    - Works on Linux, macOS, and Git Bash (Windows)
-   - **Usage**: `./run_analysis.sh [SIMULATION...] [--compare] [--pos-dir-base DIR]`
+   - **Usage**: `./run_analysis.sh [SIMULATION...] [--compare] [--year YEAR] [--all-years] [--pos-dir-base DIR]`
 
 2. **`run_analysis.bat`** (Windows CMD):
    - Windows batch file with same functionality
@@ -99,12 +118,128 @@ Three runner scripts are provided for convenience, all supporting multi-simulati
    - Supports multi-simulation analysis with `--compare` option
    - Runs comparative analysis after processing all simulations
    - Useful for automated runs and CI/CD pipelines
-   - **Usage**: `./run_analysis_auto.sh [SIMULATION...] [--compare] [--pos-dir-base DIR]`
+   - **Usage**: `./run_analysis_auto.sh [SIMULATION...] [--compare] [--year YEAR] [--all-years] [--pos-dir-base DIR]`
 
 All runners validate Python and package dependencies before starting and support:
-- **Multiple simulations**: Analyze several datasets in sequence
+- **Multiple simulations**: Analyze several datasets in sequence (2, 3, or more simulations)
 - **Comparison mode**: Generate comparative analysis with `--compare` flag
 - **Flexible data organization**: Use `--pos-dir-base` for simulation subdirectories
+
+## Yearly Comparison Reports
+
+The system supports generating comparison reports on a yearly basis, allowing you to analyze performance differences between simulations for specific years.
+
+### Key Capabilities
+
+- **Year-specific filtering**: Compare simulations for a specific year (e.g., 2022, 2023)
+- **All years analysis**: Generate separate comparison reports for each year present in the data
+- **Risk-adjusted metrics**: Yearly Sharpe ratio comparisons at both sector and bizsector levels
+- **Separate output directories**: Each year's comparison results are stored in dedicated directories (e.g., `comparison_2022`, `comparison_2023`)
+- **Year in plot titles**: Year appears in visualization titles for yearly comparison reports
+
+### Usage Examples
+
+**Compare simulations for a specific year:**
+```bash
+python compare_simulations.py bye byeorig --year 2022
+```
+
+**Generate separate comparison reports for all years:**
+```bash
+python compare_simulations.py bye byeorig --all-years
+```
+
+**Generate comparison report for a specific year:**
+```bash
+python generate_comparison_report.py --comparison-dir outputs/comparison_2022 --output-dir outputs/comparison_2022
+```
+
+**Combine with runner scripts:**
+```bash
+# Run analysis for simulations first
+./run_analysis_auto.sh bye byeorig
+
+# Then generate yearly comparisons
+python compare_simulations.py bye byeorig --all-years
+for year in 2022 2023 2024 2025 2026; do
+    python generate_comparison_report.py --comparison-dir outputs/comparison_$year --output-dir outputs/comparison_$year
+done
+```
+
+### Yearly Output Structure
+
+```
+outputs/
+├── comparison_2022/              # Year 2022 comparison results
+│   ├── comparison_plots/         # Year-specific visualizations
+│   ├── comparison_data/          # Year-specific metrics and JSON files
+│   └── comparison_report.{md,html} # Year-specific reports
+├── comparison_2023/              # Year 2023 comparison results
+│   ├── comparison_plots/
+│   ├── comparison_data/
+│   └── comparison_report.{md,html}
+└── ... (similar for other years)
+```
+
+### How It Works
+
+1. **Data Filtering**: Daily P&L data is filtered by year before computing sector and bizsector summaries
+2. **Dynamic Summary Computation**: Sharpe ratios and other metrics are recalculated from filtered daily data
+3. **Consistent Metrics**: Same comprehensive comparison metrics as full-period analysis
+4. **Automatic Year Detection**: The system automatically detects years present in your data (2022-2026)
+
+### Year-Specific Comparison Metrics
+
+Each yearly comparison includes:
+- Total P&L comparison with year-specific performance
+- Sector and bizsector performance differences
+- Risk metrics (volatility, Sharpe ratio, max drawdown, win rate) calculated on yearly data
+- Correlation analysis between simulation returns for the year
+- Visualizations specific to the year's performance patterns
+
+## Interpreting Results and Strategy Selection
+
+The comparison analysis provides actionable insights for strategy evaluation and selection. Based on a comprehensive analysis of three simulations (`byd`, `byeorig`, `bye`), here are key findings:
+
+### Performance Rankings
+
+| Metric | Best | Second | Third |
+|--------|------|--------|-------|
+| **Total P&L** | byeorig | bye | byd |
+| **Sharpe Ratio** | bye | byeorig | byd |
+| **Volatility** | bye (lowest) | byd | byeorig |
+| **Win Rate** | bye | byd | byeorig |
+| **Max Drawdown** | byd (smallest) | bye | byeorig |
+
+### Strategy Characteristics
+
+- **`bye`**: Balanced risk‑managed strategy – highest risk‑adjusted returns, lowest volatility, best consistency
+- **`byeorig`**: High‑return aggressive strategy – maximum absolute returns, higher volatility  
+- **`byd`**: Conservative capital‑preservation strategy – best drawdown control, utility‑focused
+
+### Year‑by‑Year Performance Patterns
+- **2022**: Aggressive strategies perform best (`byeorig`)
+- **2023‑2024**: Conservative strategies excel (`byd`)
+- **2025‑2026**: Balanced strategies dominate (`bye`)
+
+### Recommendations
+
+| Objective | Recommended Simulation | Reason |
+|-----------|------------------------|--------|
+| **Risk‑adjusted returns** | `bye` | Highest Sharpe ratio (0.124) |
+| **Absolute returns** | `byeorig` | Highest total P&L ($13.34M) |
+| **Lower volatility** | `bye` | Lowest volatility (97,395) |
+| **Consistency** | `bye` | Highest win rate (54.22%) |
+| **Drawdown protection** | `byd` | Smallest max drawdown ($2.20M) |
+| **Overall balanced** | `bye` | Best composite score across metrics |
+
+### Sector‑Level Insights
+- All simulations excel in **Utilities** and **Information Technology** sectors
+- `bye` leads in 5 sectors (broadest diversification)
+- `byd` strongest in Utilities (Sharpe: 1.026)
+- `byeorig` strongest in Information Technology (Sharpe: 1.247)
+
+These insights demonstrate how the pipeline can identify strategy characteristics, assess performance across market regimes, and inform strategic decisions.
 
 ## Data Requirements
 
@@ -135,10 +270,15 @@ All runners validate Python and package dependencies before starting and support
 - `outputs/{SIMULATION}/{SIMULATION}_analysis_report.{md,html}`: Comprehensive reports with sector and bizsector insights
 
 ### Comparison Outputs (when using `--compare`)
-- `outputs/comparison/`: Comparative analysis directory
+- `outputs/comparison/`: Comparative analysis directory (all years combined)
 - `outputs/comparison/comparison_plots/`: Comparative visualizations including sector and bizsector comparisons
 - `outputs/comparison/comparison_data/`: Comparison metrics and data including sector and bizsector JSON files
 - `outputs/comparison/comparison_report.{md,html}`: Comprehensive comparison report with sector and bizsector analysis
+
+### Yearly Comparison Outputs (when using `--year` or `--all-years`)
+- `outputs/comparison_2022/`, `outputs/comparison_2023/`, etc.: Year-specific comparison directories
+- Each directory contains the same structure as `outputs/comparison/` but with data filtered to that year
+- Yearly comparisons include recalculated Sharpe ratios and risk metrics based on yearly data
 
 ### Example Output Structure
 ```
@@ -155,10 +295,19 @@ outputs/
 │   ├── pnl_plots/             # Sector-level visualizations
 │   ├── bizsector_plots/       # Bizsector-level visualizations
 │   └── BLOWFISH_analysis_report.{md,html}
-└── comparison/
-    ├── comparison_plots/      # Includes sector and bizsector comparison charts
-    ├── comparison_data/       # Includes sector_*.json and bizsector_*.json files
-    └── comparison_report.{md,html}
+├── comparison/                # Default comparison (all years combined)
+│   ├── comparison_plots/      # Includes sector and bizsector comparison charts
+│   ├── comparison_data/       # Includes sector_*.json and bizsector_*.json files
+│   └── comparison_report.{md,html}
+├── comparison_2022/           # Year 2022 comparison (when using --year or --all-years)
+│   ├── comparison_plots/      # Year-specific visualizations
+│   ├── comparison_data/       # Year-specific metrics and JSON files
+│   └── comparison_report.{md,html}
+├── comparison_2023/           # Year 2023 comparison
+│   ├── comparison_plots/
+│   ├── comparison_data/
+│   └── comparison_report.{md,html}
+└── ... (similar for other years)
 ```
 
 ## License

@@ -6,6 +6,8 @@ combined_positions_with_industry.csv
 outputs*/
 pnl_plots/
 pnl_results/
+bye*/
+byd*/
 
 # Python cache and virtual environment
 __pycache__/

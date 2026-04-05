@@ -11,8 +11,9 @@ warnings.filterwarnings('ignore')
 plt.style.use('seaborn-v0_8-darkgrid')
 sns.set_palette("husl")
 
-def load_simulation_data(simulation, output_base_dir='outputs'):
-    """Load analysis results for a single simulation including sector and bizsector data"""
+def load_simulation_data(simulation, output_base_dir='outputs', year=None):
+    """Load analysis results for a single simulation including sector and bizsector data
+    If year is provided, filter data to that year and compute summaries from filtered daily data"""
     sim_dir = Path(output_base_dir) / simulation / 'pnl_results'
 
     if not sim_dir.exists():
@@ -31,25 +32,44 @@ def load_simulation_data(simulation, output_base_dir='outputs'):
             return None, None, None, None, None
 
         sector_daily = pd.read_csv(sector_daily_path, parse_dates=['date'])
-        sector_summary = pd.read_csv(sector_summary_path)
         daily_total = pd.read_csv(daily_total_path, parse_dates=['date'])
 
         # Load bizsector data if available
         bizsector_daily = None
-        bizsector_summary = None
-        if bizsector_daily_path.exists() and bizsector_summary_path.exists():
+        if bizsector_daily_path.exists():
             bizsector_daily = pd.read_csv(bizsector_daily_path, parse_dates=['date'])
-            bizsector_summary = pd.read_csv(bizsector_summary_path)
-            # Add simulation identifier
-            bizsector_daily['simulation'] = simulation
-            bizsector_summary['simulation'] = simulation
         else:
             print(f"  Note: Bizsector data not found for '{simulation}', skipping bizsector comparison")
+
+        # Filter by year if specified
+        if year is not None:
+            year = int(year)  # Ensure year is Python int
+            sector_daily = sector_daily[sector_daily['date'].dt.year == year].copy()
+            daily_total = daily_total[daily_total['date'].dt.year == year].copy()
+            if bizsector_daily is not None:
+                bizsector_daily = bizsector_daily[bizsector_daily['date'].dt.year == year].copy()
+            # Compute summaries from filtered daily data
+            sector_summary = compute_sector_summary_from_daily(sector_daily)
+            if bizsector_daily is not None and not bizsector_daily.empty:
+                bizsector_summary = compute_bizsector_summary_from_daily(bizsector_daily)
+            else:
+                bizsector_summary = None
+        else:
+            # Load precomputed summaries
+            sector_summary = pd.read_csv(sector_summary_path)
+            if bizsector_daily is not None:
+                bizsector_summary = pd.read_csv(bizsector_summary_path)
+            else:
+                bizsector_summary = None
 
         # Add simulation identifier
         sector_daily['simulation'] = simulation
         sector_summary['simulation'] = simulation
         daily_total['simulation'] = simulation
+        if bizsector_daily is not None:
+            bizsector_daily['simulation'] = simulation
+        if bizsector_summary is not None:
+            bizsector_summary['simulation'] = simulation
 
         print(f"Loaded data for simulation '{simulation}':")
         print(f"  - Sector daily: {sector_daily.shape} rows")
@@ -57,6 +77,7 @@ def load_simulation_data(simulation, output_base_dir='outputs'):
         print(f"  - Daily total: {daily_total.shape} rows")
         if bizsector_daily is not None:
             print(f"  - Bizsector daily: {bizsector_daily.shape} rows")
+        if bizsector_summary is not None:
             print(f"  - Bizsector summary: {bizsector_summary.shape} rows")
 
         return sector_daily, sector_summary, daily_total, bizsector_daily, bizsector_summary
@@ -64,6 +85,70 @@ def load_simulation_data(simulation, output_base_dir='outputs'):
     except Exception as e:
         print(f"Error loading data for '{simulation}': {e}")
         return None, None, None, None, None
+
+def compute_sector_summary_from_daily(sector_daily):
+    """Compute sector summary from daily P&L data"""
+    if sector_daily is None or sector_daily.empty:
+        return pd.DataFrame()
+
+    # Group by sector
+    sector_summary = sector_daily.groupby('sector').agg({
+        'total_pnl': 'sum',
+        'symbol_count': 'mean',
+        'total_exposure': 'mean'
+    }).reset_index()
+
+    # Calculate Sharpe ratio per sector
+    sharpe_ratios = []
+    for sector in sector_daily['sector'].unique():
+        sector_data = sector_daily[sector_daily['sector'] == sector]
+        daily_pnl = sector_data['total_pnl']
+        if len(daily_pnl) < 2:
+            sharpe = 0
+        else:
+            mean_return = daily_pnl.mean()
+            std_return = daily_pnl.std()
+            if std_return != 0:
+                sharpe = mean_return / std_return * np.sqrt(252)
+            else:
+                sharpe = 0
+        sharpe_ratios.append({'sector': sector, 'sharpe_ratio': sharpe})
+
+    sharpe_df = pd.DataFrame(sharpe_ratios)
+    sector_summary = pd.merge(sector_summary, sharpe_df, on='sector', how='left')
+    return sector_summary
+
+def compute_bizsector_summary_from_daily(bizsector_daily):
+    """Compute bizsector summary from daily P&L data"""
+    if bizsector_daily is None or bizsector_daily.empty:
+        return pd.DataFrame()
+
+    # Group by bizsector
+    bizsector_summary = bizsector_daily.groupby('bizsector').agg({
+        'total_pnl': 'sum',
+        'symbol_count': 'mean',
+        'total_exposure': 'mean'
+    }).reset_index()
+
+    # Calculate Sharpe ratio per bizsector
+    sharpe_ratios = []
+    for bizsector in bizsector_daily['bizsector'].unique():
+        bizsector_data = bizsector_daily[bizsector_daily['bizsector'] == bizsector]
+        daily_pnl = bizsector_data['total_pnl']
+        if len(daily_pnl) < 2:
+            sharpe = 0
+        else:
+            mean_return = daily_pnl.mean()
+            std_return = daily_pnl.std()
+            if std_return != 0:
+                sharpe = mean_return / std_return * np.sqrt(252)
+            else:
+                sharpe = 0
+        sharpe_ratios.append({'bizsector': bizsector, 'sharpe_ratio': sharpe})
+
+    sharpe_df = pd.DataFrame(sharpe_ratios)
+    bizsector_summary = pd.merge(bizsector_summary, sharpe_df, on='bizsector', how='left')
+    return bizsector_summary
 
 def align_dates_across_simulations(sector_daily_dict):
     """Align dates across simulations to ensure fair comparison"""
@@ -275,11 +360,22 @@ def calculate_comparison_metrics(sector_daily_dict, sector_summary_dict, daily_t
         'comparison_metrics': comparison_metrics
     }
 
-def generate_comparison_visualizations(comparison_results, simulations, sector_daily_dict, output_dir):
-    """Generate comparative visualizations"""
+def generate_comparison_visualizations(comparison_results, simulations, sector_daily_dict, output_dir, year=None):
+    """Generate comparative visualizations
+
+    Parameters:
+    - comparison_results: Dictionary with comparison metrics
+    - simulations: List of simulation names
+    - sector_daily_dict: Dictionary of daily sector data per simulation
+    - output_dir: Directory to save visualizations
+    - year: Optional year for yearly reports, adds year to titles
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"\nGenerating comparison visualizations in '{output_dir}'...")
+
+    # Add year suffix to titles if year is specified
+    year_suffix = f" (Year {year})" if year is not None else ""
 
     # 1. Total P&L Comparison Bar Chart
     if 'total_pnl_comparison' in comparison_results and not comparison_results['total_pnl_comparison'].empty:
@@ -288,7 +384,7 @@ def generate_comparison_visualizations(comparison_results, simulations, sector_d
         colors = plt.cm.Set3(np.linspace(0, 1, len(df)))
 
         bars = plt.bar(df['simulation'], df['total_pnl'], color=colors)
-        plt.title('Total P&L Comparison Across Simulations', fontsize=14, fontweight='bold')
+        plt.title(f'Total P&L Comparison Across Simulations{year_suffix}', fontsize=14, fontweight='bold')
         plt.xlabel('Simulation')
         plt.ylabel('Total P&L ($)')
 
@@ -320,7 +416,7 @@ def generate_comparison_visualizations(comparison_results, simulations, sector_d
                 plt.bar(x + i*width - width*(len(simulations)-1)/2, values,
                        width=width, label=sim, alpha=0.8)
 
-            plt.title('Sector P&L Comparison Across Simulations', fontsize=14, fontweight='bold')
+            plt.title(f'Sector P&L Comparison Across Simulations{year_suffix}', fontsize=14, fontweight='bold')
             plt.xlabel('Sector')
             plt.ylabel('Total P&L ($)')
             plt.xticks(x, sectors, rotation=45, ha='right')
@@ -346,7 +442,7 @@ def generate_comparison_visualizations(comparison_results, simulations, sector_d
                 plt.bar(x + i*width - width*(len(simulations)-1)/2, values,
                        width=width, label=sim, alpha=0.8)
 
-            plt.title('Sector Sharpe Ratio Comparison Across Simulations', fontsize=14, fontweight='bold')
+            plt.title(f'Sector Sharpe Ratio Comparison Across Simulations{year_suffix}', fontsize=14, fontweight='bold')
             plt.xlabel('Sector')
             plt.ylabel('Sharpe Ratio (annualized)')
             plt.xticks(x, sectors, rotation=45, ha='right')
@@ -372,7 +468,7 @@ def generate_comparison_visualizations(comparison_results, simulations, sector_d
                 plt.bar(x + i*width - width*(len(simulations)-1)/2, values,
                        width=width, label=sim, alpha=0.8)
 
-            plt.title('Bizsector P&L Comparison Across Simulations', fontsize=14, fontweight='bold')
+            plt.title(f'Bizsector P&L Comparison Across Simulations{year_suffix}', fontsize=14, fontweight='bold')
             plt.xlabel('Bizsector')
             plt.ylabel('Total P&L ($)')
             plt.xticks(x, bizsectors, rotation=45, ha='right')
@@ -398,7 +494,7 @@ def generate_comparison_visualizations(comparison_results, simulations, sector_d
                 plt.bar(x + i*width - width*(len(simulations)-1)/2, values,
                        width=width, label=sim, alpha=0.8)
 
-            plt.title('Bizsector Sharpe Ratio Comparison Across Simulations', fontsize=14, fontweight='bold')
+            plt.title(f'Bizsector Sharpe Ratio Comparison Across Simulations{year_suffix}', fontsize=14, fontweight='bold')
             plt.xlabel('Bizsector')
             plt.ylabel('Sharpe Ratio (annualized)')
             plt.xticks(x, bizsectors, rotation=45, ha='right')
@@ -430,7 +526,7 @@ def generate_comparison_visualizations(comparison_results, simulations, sector_d
                 plt.plot(cumulative_pnl.index, cumulative_pnl.values,
                         label=sim, color=colors[idx], linewidth=2, alpha=0.8)
 
-        plt.title('Cumulative P&L Comparison Across Simulations', fontsize=14, fontweight='bold')
+        plt.title(f'Cumulative P&L Comparison Across Simulations{year_suffix}', fontsize=14, fontweight='bold')
         plt.xlabel('Date')
         plt.ylabel('Cumulative P&L ($)')
         plt.legend()
@@ -465,7 +561,7 @@ def generate_comparison_visualizations(comparison_results, simulations, sector_d
         for idx in range(len(metrics), len(axes)):
             fig.delaxes(axes[idx])
 
-        fig.suptitle('Risk Metrics Comparison Across Simulations', fontsize=16, fontweight='bold')
+        fig.suptitle(f'Risk Metrics Comparison Across Simulations{year_suffix}', fontsize=16, fontweight='bold')
         plt.tight_layout()
         plt.savefig(output_dir / 'risk_metrics_comparison.png', dpi=150, bbox_inches='tight')
         plt.close()
@@ -485,7 +581,7 @@ def generate_comparison_visualizations(comparison_results, simulations, sector_d
             colors = ['green' if v > 0 else 'red' for v in corr_values]
 
             bars = plt.bar(x_pos, corr_values, color=colors, alpha=0.7)
-            plt.title('Daily Returns Correlation Between Simulations', fontsize=14, fontweight='bold')
+            plt.title(f'Daily Returns Correlation Between Simulations{year_suffix}', fontsize=14, fontweight='bold')
             plt.xlabel('Simulation Pair')
             plt.ylabel('Correlation Coefficient')
             plt.xticks(x_pos, sim_pairs, rotation=45, ha='right')
@@ -581,35 +677,42 @@ def save_comparison_results(comparison_results, output_dir):
 
     print(f"Saved {len(list(output_dir.glob('*.csv')))} + {len(list(output_dir.glob('*.json')))} result files")
 
-def main():
-    parser = argparse.ArgumentParser(description='Compare P&L analysis results across multiple simulations')
-    parser.add_argument('simulations', nargs='+',
-                        help='Simulation names to compare (e.g., TWOFISH BLOWFISH)')
-    parser.add_argument('--output-base-dir', '-o', default='outputs',
-                        help='Base output directory containing simulation results (default: outputs)')
-    parser.add_argument('--comparison-dir', '-c', default='comparison',
-                        help='Directory to save comparison results (default: outputs/comparison)')
+def get_years_in_data(simulations, output_base_dir):
+    """Get unique years present across all simulations"""
+    years = set()
+    for sim in simulations:
+        sim_dir = Path(output_base_dir) / sim / 'pnl_results'
+        sector_daily_path = sim_dir / 'sector_daily_pnl.csv'
+        if not sector_daily_path.exists():
+            print(f"Warning: sector_daily_pnl.csv not found for '{sim}', skipping year detection")
+            continue
+        try:
+            df = pd.read_csv(sector_daily_path, parse_dates=['date'])
+            years.update(int(y) for y in df['date'].dt.year.unique())
+        except Exception as e:
+            print(f"Error reading data for '{sim}': {e}")
+    if not years:
+        # Fallback: assume recent years
+        print("Warning: No years detected, using default range 2022-2026")
+        years = {2022, 2023, 2024, 2025, 2026}
+    return sorted(years)
 
-    args = parser.parse_args()
+def run_comparison_for_year(simulations, output_base_dir, comparison_dir, year=None):
+    """Run comparison for a specific year (or all years if year is None)"""
+    # Adjust comparison directory name if year is specified
+    if year is not None:
+        comparison_dir = f"{comparison_dir}_{year}"
 
-    print("="*60)
-    print("COMPARING SIMULATION RESULTS")
-    print("="*60)
-    print(f"Simulations to compare: {', '.join(args.simulations)}")
-    print(f"Results directory: {args.output_base_dir}")
-    print(f"Comparison output: {args.comparison_dir}")
-    print()
-
-    # Load data for each simulation
+    # Load data for each simulation with year filter
     sector_daily_dict = {}
     sector_summary_dict = {}
     daily_total_dict = {}
     bizsector_daily_dict = {}
     bizsector_summary_dict = {}
 
-    for sim in args.simulations:
+    for sim in simulations:
         print(f"Loading data for simulation '{sim}'...")
-        sector_daily, sector_summary, daily_total, bizsector_daily, bizsector_summary = load_simulation_data(sim, args.output_base_dir)
+        sector_daily, sector_summary, daily_total, bizsector_daily, bizsector_summary = load_simulation_data(sim, output_base_dir, year)
 
         if sector_daily is not None:
             sector_daily_dict[sim] = sector_daily
@@ -623,9 +726,9 @@ def main():
             print(f"  Warning: Could not load data for '{sim}', skipping")
 
     if len(sector_daily_dict) < 2:
-        print("\nERROR: Need at least 2 simulations with valid data to compare")
+        print(f"\nERROR: Need at least 2 simulations with valid data to compare")
         print(f"Successfully loaded {len(sector_daily_dict)} simulation(s)")
-        return
+        return False
 
     print(f"\nSuccessfully loaded data for {len(sector_daily_dict)} simulation(s)")
 
@@ -637,19 +740,70 @@ def main():
     )
 
     # Generate visualizations
-    comparison_output_dir = Path(args.output_base_dir) / args.comparison_dir
-    generate_comparison_visualizations(comparison_results, list(sector_daily_dict.keys()), sector_daily_dict, comparison_output_dir)
+    comparison_output_dir = Path(output_base_dir) / comparison_dir
+    generate_comparison_visualizations(comparison_results, list(sector_daily_dict.keys()), sector_daily_dict, comparison_output_dir, year)
 
     # Save results
     save_comparison_results(comparison_results, comparison_output_dir)
 
-    print("\n" + "="*60)
-    print("COMPARISON COMPLETE")
+    print(f"\nComparison results saved to: {comparison_output_dir}")
+    return True
+
+def main():
+    parser = argparse.ArgumentParser(description='Compare P&L analysis results across multiple simulations')
+    parser.add_argument('simulations', nargs='+',
+                        help='Simulation names to compare (e.g., TWOFISH BLOWFISH or TWOFISH,BLOWFISH)')
+    parser.add_argument('--output-base-dir', '-o', default='outputs',
+                        help='Base output directory containing simulation results (default: outputs)')
+    parser.add_argument('--comparison-dir', '-c', default='comparison',
+                        help='Directory to save comparison results (default: outputs/comparison)')
+    parser.add_argument('--year', '-y', type=int, default=None,
+                        help='Filter data to specific year (e.g., 2022). If not provided, uses all years')
+    parser.add_argument('--all-years', action='store_true',
+                        help='Generate separate comparison reports for each year present in data')
+
+    args = parser.parse_args()
+
+    # Process simulations: support comma-separated list in addition to space-separated
+    simulations = []
+    for sim in args.simulations:
+        if ',' in sim:
+            simulations.extend([s.strip() for s in sim.split(',') if s.strip()])
+        else:
+            simulations.append(sim.strip())
+    args.simulations = simulations
+
     print("="*60)
-    print(f"Results saved to: {comparison_output_dir}")
-    print(f"Visualizations: {comparison_output_dir}/*.png")
-    print(f"Data files: {comparison_output_dir}/*.csv")
+    print("COMPARING SIMULATION RESULTS")
     print("="*60)
+    print(f"Simulations to compare: {', '.join(args.simulations)}")
+    print(f"Results directory: {args.output_base_dir}")
+    print(f"Comparison output: {args.comparison_dir}")
+    if args.year is not None:
+        print(f"Year filter: {args.year}")
+    if args.all_years:
+        print("Generating separate reports for each year")
+    print()
+
+    # Handle different year modes
+    if args.year is not None:
+        # Single year comparison
+        run_comparison_for_year(args.simulations, args.output_base_dir, args.comparison_dir, args.year)
+    elif args.all_years:
+        # Generate separate comparisons for each year
+        years = get_years_in_data(args.simulations, args.output_base_dir)
+        print(f"Found years in data: {years}")
+        for year in years:
+            print(f"\n{'='*60}")
+            print(f"COMPARISON FOR YEAR {year}")
+            print(f"{'='*60}")
+            run_comparison_for_year(args.simulations, args.output_base_dir, args.comparison_dir, year)
+        print(f"\n{'='*60}")
+        print("ALL YEARLY COMPARISONS COMPLETE")
+        print(f"{'='*60}")
+    else:
+        # Default: compare all years combined
+        run_comparison_for_year(args.simulations, args.output_base_dir, args.comparison_dir, year=None)
 
 if __name__ == '__main__':
     main()

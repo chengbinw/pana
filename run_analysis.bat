@@ -5,7 +5,9 @@ REM Usage:
 REM   run_analysis.bat                         Run default simulation (TWOFISH)
 REM   run_analysis.bat TWOFISH                 Run specific simulation
 REM   run_analysis.bat TWOFISH BLOWFISH        Run multiple simulations
+REM   run_analysis.bat TWOFISH BLOWFISH BYE    Run multiple simulations (3+)
 REM   run_analysis.bat TWOFISH BLOWFISH --compare  Run multiple and compare
+REM   run_analysis.bat TWOFISH BLOWFISH BYE --compare  Run multiple and compare (3+)
 REM   run_analysis.bat --help                  Show help
 
 setlocal enabledelayedexpansion
@@ -47,11 +49,40 @@ if "%~1"=="--*" (
     echo Use --help for usage information
     exit /b 1
 )
-REM Assume it's a simulation name
-if "!SIMULATIONS!"=="TWOFISH" (
-    set SIMULATIONS=%~1
+REM Assume it's a simulation name - support comma-separated list
+set ARG=%~1
+
+REM Check if argument contains comma
+echo !ARG! | find "," >nul
+if errorlevel 1 (
+    REM No comma - treat as single simulation name
+    if "!SIMULATIONS!"=="TWOFISH" (
+        set SIMULATIONS=%~1
+    ) else (
+        set SIMULATIONS=!SIMULATIONS! %~1
+    )
 ) else (
-    set SIMULATIONS=!SIMULATIONS! %~1
+    REM Contains comma - split into multiple simulations
+    set "COM_SEP_ARG=%~1"
+    REM Replace commas with spaces for token splitting
+    set "COM_SEP_ARG=!COM_SEP_ARG:,= !"
+    REM Loop through space-separated parts
+    set "FIRST_TOKEN=1"
+    for %%t in (!COM_SEP_ARG!) do (
+        REM Skip empty tokens
+        if not "%%t"=="" (
+            if !FIRST_TOKEN!==1 (
+                if "!SIMULATIONS!"=="TWOFISH" (
+                    set SIMULATIONS=%%t
+                ) else (
+                    set SIMULATIONS=!SIMULATIONS! %%t
+                )
+                set FIRST_TOKEN=0
+            ) else (
+                set SIMULATIONS=!SIMULATIONS! %%t
+            )
+        )
+    )
 )
 shift /1
 goto parse_args
@@ -61,7 +92,7 @@ echo Financial Position Analysis Pipeline
 echo Usage: %0 [SIMULATION...] [--compare] [--pos-dir DIR] [--pos-dir-base DIR] [--output-dir DIR]
 echo.
 echo Arguments:
-echo   SIMULATION...    One or more simulation names (default: TWOFISH)
+echo   SIMULATION...    One or more simulation names, comma-separated or space-separated (default: TWOFISH)
 echo   --compare        Run comparison after analyzing all simulations
 echo   --pos-dir DIR    Directory containing position files (default: pos)
 echo   --pos-dir-base DIR Base directory with simulation subdirectories
